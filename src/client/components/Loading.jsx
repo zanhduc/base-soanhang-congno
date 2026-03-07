@@ -1,11 +1,11 @@
-/**
- * Loading Component — dùng chung cho mọi API call
+﻿/**
+ * Loading Component - dĂ¹ng chung cho má»i API call
  *
  * Usage:
- *   <Loading />                        ← spinner nhỏ inline
- *   <Loading size="lg" />              ← spinner lớn
- *   <Loading overlay />                ← full-screen overlay
- *   <Loading text="Đang tải..." />     ← có text
+ *   <Loading />                        - spinner nhá» inline
+ *   <Loading size="lg" />              - spinner lá»›n
+ *   <Loading overlay />                - full-screen overlay
+ *   <Loading text="Äang táº£i..." />     - cĂ³ text
  */
 export default function Loading({ size = "md", overlay = false, text = "" }) {
   const sizes = {
@@ -17,7 +17,7 @@ export default function Loading({ size = "md", overlay = false, text = "" }) {
   const spinner = (
     <div className="flex flex-col items-center justify-center gap-2">
       <div
-        className={`${sizes[size] || sizes.md} rounded-full border-blue-500/30 border-t-blue-500 animate-spin`}
+        className={`${sizes[size] || sizes.md} rounded-full border-rose-500/30 border-t-rose-500 animate-spin`}
       />
       {text && (
         <span className="text-xs text-slate-500 font-medium">{text}</span>
@@ -35,3 +35,4 @@ export default function Loading({ size = "md", overlay = false, text = "" }) {
 
   return spinner
 }
+

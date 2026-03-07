@@ -1,4 +1,4 @@
-import { localAdapter } from "./adapters/localAdapter.js";
+﻿import { localAdapter } from "./adapters/localAdapter.js";
 import { gasAdapter } from "./adapters/gasAdapter.js";
 
 const adapter = import.meta.env.DEV ? localAdapter : gasAdapter;
@@ -11,3 +11,9 @@ export const login = adapter.login;
 export const getUserInfo = adapter.getUserInfo;
 export const getDemoAccounts = adapter.getDemoAccounts;
 export const getGlobalNotice = adapter.getGlobalNotice;
+export const getNextOrderFormDefaults = adapter.getNextOrderFormDefaults;
+export const getProductCatalog = adapter.getProductCatalog;
+export const getCustomerCatalog = adapter.getCustomerCatalog;
+export const createOrder = adapter.createOrder;
+
+
