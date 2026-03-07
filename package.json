@@ -1,0 +1,26 @@
+{
+    "name": "soanhang-congno",
+    "private": true,
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build:client": "vite build",
+        "build:server": "node esbuild.server.js",
+        "build": "npm run build:client && npm run build:server",
+        "push": "npm run build && clasp push"
+    },
+    "dependencies": {
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0"
+    },
+    "devDependencies": {
+        "@vitejs/plugin-react": "^4.0.0",
+        "autoprefixer": "^10.4.27",
+        "esbuild": "^0.20.0",
+        "postcss": "^8.5.6",
+        "tailwindcss": "^4.2.1",
+        "vite": "^5.0.0",
+        "vite-plugin-singlefile": "^0.13.0"
+    }
+}

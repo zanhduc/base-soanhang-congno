@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>GAS React App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+              mono: ['Consolas', 'monospace'],
+            }
+          }
+        }
+      }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      * { box-sizing: border-box; }
+      body { background: var(--bg); }
+      @keyframes fadeUp {
+        from { opacity: 0; transform: translateY(16px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes pulseglow {
+        0%, 100% { filter: drop-shadow(0 0 10px rgba(37,99,235,0.4)); }
+        50%       { filter: drop-shadow(0 0 22px rgba(37,99,235,0.8)); }
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      
+      .spinner {
+        display: inline-block; width: 16px; height: 16px;
+        border: 2px solid rgba(0,0,0,0.1);
+        border-top-color: #3b82f6; border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        vertical-align: middle; margin-right: 6px;
+      }
+      
+      /* Fix dark background on browser autofill */
+      input:-webkit-autofill,
+      input:-webkit-autofill:hover, 
+      input:-webkit-autofill:focus, 
+      input:-webkit-autofill:active {
+        -webkit-box-shadow: 0 0 0 30px #ffffff inset !important;
+        -webkit-text-fill-color: #0f172a !important;
+        transition: background-color 5000s ease-in-out 0s;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/client/main.jsx"></script>
+  </body>
+</html>
