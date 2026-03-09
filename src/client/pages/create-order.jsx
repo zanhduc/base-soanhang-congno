@@ -14,6 +14,7 @@ const foldText = (v) =>
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
 
 const toTitleCase = (v) =>
   String(v || "")
@@ -556,17 +557,17 @@ export default function CreateOrderPage() {
   const customerSuggestions = getCustomerSuggestions(customerInfo.tenKhach)
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-50 to-rose-50/30">
-      <div className="mx-auto max-w-2xl px-4 py-6 md:py-8 pb-24">
+    <main className="min-h-screen pb-24 bg-gradient-to-br from-slate-50 via-slate-50 to-rose-50/30">
+      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 md:py-8 pb-24">
         {/* Header */}
-        <div className="mb-8 md:mb-12 animate-[fadeUp_0.4s_ease]">
+        <div className="mb-8 md:mb-10 animate-[fadeUp_0.4s_ease] max-w-3xl">
           <div className="inline-flex items-center gap-2 mb-4 md:mb-6">
             <div className="w-3 h-3 rounded-full bg-rose-700" />
             <span className="text-xs font-bold text-rose-700 uppercase tracking-widest">Soạn Đơn</span>
           </div>
           <div className="mb-4 md:mb-6">
-            <h1 className="text-4xl md:text-5xl font-black text-slate-900 leading-tight">Soạn Đơn</h1>
-            <h2 className="text-4xl md:text-5xl font-black bg-gradient-to-r from-rose-700 to-rose-500 bg-clip-text text-transparent leading-tight mt-1">
+            <h1 className="text-4xl md:text-5xl font-black text-slate-900 leading-[1.15] md:leading-[1.2] pb-1 md:pb-2">Soạn Đơn</h1>
+            <h2 className="text-4xl md:text-5xl font-black bg-gradient-to-r from-rose-700 to-rose-500 bg-clip-text text-transparent leading-[1.15] md:leading-[1.2] pb-1">
               Hàng
             </h2>
           </div>
@@ -576,7 +577,8 @@ export default function CreateOrderPage() {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-5 md:space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-5 md:space-y-6 xl:grid xl:grid-cols-12 xl:gap-6 xl:space-y-0">
+          <div className="xl:col-span-8 space-y-5 md:space-y-6">
           {/* Customer Info Toggle */}
           <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200">
             <button type="button" onClick={() => setIsCustomerMode(!isCustomerMode)}
@@ -716,7 +718,7 @@ export default function CreateOrderPage() {
           {/* Products Header + List */}
           {products.length > 0 && (
             <>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between xl:hidden">
                 <div>
                   <h2 className="text-xl md:text-2xl font-bold text-slate-800">Đơn hàng</h2>
                   <p className="text-xs md:text-sm text-slate-500 mt-1">Các mặt hàng trong đơn</p>
@@ -725,7 +727,7 @@ export default function CreateOrderPage() {
                   {totalItems}
                 </div>
               </div>
-              <div className="space-y-3">
+              <div className="space-y-3 xl:hidden">
                 {products.map((product) => (
                   <ProductListItem key={product.id} product={product}
                     onUpdate={(updated) => handleUpdateProduct(product.id, updated)}
@@ -733,26 +735,6 @@ export default function CreateOrderPage() {
                 ))}
               </div>
             </>
-          )}
-
-          {/* Summary + Submit */}
-          {products.length > 0 && (
-            <div className="space-y-4 animate-[fadeUp_0.3s_ease]">
-              <OrderSummary totalAmount={totalAmount} totalItems={totalItems} />
-              <button type="submit" disabled={isSubmitting}
-                className={`w-full rounded-xl px-6 py-4 font-bold text-white text-base md:text-lg transition-all duration-300 active:scale-95 ${
-                  isSubmitting
-                    ? "bg-slate-400 cursor-not-allowed"
-                    : "bg-gradient-to-r from-rose-700 to-rose-500 hover:shadow-lg hover:shadow-rose-700/25"
-                }`}>
-                {isSubmitting ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Đang gửi...
-                  </span>
-                ) : "Gửi đơn hàng"}
-              </button>
-            </div>
           )}
 
           {/* Empty state */}
@@ -767,6 +749,50 @@ export default function CreateOrderPage() {
               <p className="text-sm text-slate-500">Thêm mặt hàng vào đơn để bắt đầu</p>
             </div>
           )}
+          </div>
+
+          <aside className="xl:col-span-4 xl:sticky xl:top-6 self-start space-y-4">
+            {products.length > 0 && (
+              <div className="hidden xl:flex items-center justify-between rounded-2xl border border-slate-200/70 bg-white p-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-800">Đơn hàng</h2>
+                  <p className="text-sm text-slate-500 mt-1">Các mặt hàng trong đơn</p>
+                </div>
+                <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-rose-700/10 text-rose-700 font-semibold">
+                  {totalItems}
+                </div>
+              </div>
+            )}
+            {products.length > 0 && (
+              <div className="hidden xl:block space-y-3 max-h-[48vh] overflow-y-auto pr-1">
+                {products.map((product) => (
+                  <ProductListItem key={`desktop-${product.id}`} product={product}
+                    onUpdate={(updated) => handleUpdateProduct(product.id, updated)}
+                    onRemove={() => handleRemoveProduct(product.id)} />
+                ))}
+              </div>
+            )}
+            <OrderSummary totalAmount={totalAmount} totalItems={totalItems} />
+            {products.length > 0 ? (
+              <button type="submit" disabled={isSubmitting}
+                className={`w-full rounded-xl px-6 py-4 font-bold text-white text-base md:text-lg transition-all duration-300 active:scale-95 ${
+                  isSubmitting
+                    ? "bg-slate-400 cursor-not-allowed"
+                    : "bg-gradient-to-r from-rose-700 to-rose-500 hover:shadow-lg hover:shadow-rose-700/25"
+                }`}>
+                {isSubmitting ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Đang gửi...
+                  </span>
+                ) : "Gửi đơn hàng"}
+              </button>
+            ) : (
+              <div className="rounded-2xl border border-slate-200/70 bg-white p-4 text-sm text-slate-500">
+                Thêm ít nhất một sản phẩm để bật nút gửi đơn.
+              </div>
+            )}
+          </aside>
         </form>
       </div>
     </main>

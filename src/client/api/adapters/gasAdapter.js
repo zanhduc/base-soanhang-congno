@@ -506,6 +506,134 @@ function getProductCatalog() {
   }
 }
 
+function findProductRowByKey_(sheet, dataStartRow, tenSanPham, donVi) {
+  var lastDataRow = getLastDataRowByCol_(sheet, 2, dataStartRow);
+  if (lastDataRow < dataStartRow) return 0;
+  var key = buildProductKey_(tenSanPham, donVi);
+  var values = sheet.getRange(dataStartRow, 2, lastDataRow - dataStartRow + 1, 2).getDisplayValues();
+  for (var i = 0; i < values.length; i++) {
+    if (buildProductKey_(values[i][0], values[i][1]) === key) {
+      return dataStartRow + i;
+    }
+  }
+  return 0;
+}
+
+function updateProductCatalogItem(payload) {
+  try {
+    var p = payload || {};
+    var originalTenSanPham = String(p.originalTenSanPham || "").trim();
+    var originalDonVi = String(p.originalDonVi || "").trim();
+    var tenSanPham = String(p.tenSanPham || "").trim();
+    var donVi = String(p.donVi || "").trim();
+    var donGiaBan = Math.max(parseMoneyNumber_(p.donGiaBan), 0);
+    var giaVon = Math.max(parseMoneyNumber_(p.giaVon), 0);
+
+    if (!originalTenSanPham || !originalDonVi) {
+      throw new Error("Thiếu thông tin sản phẩm gốc");
+    }
+    if (!tenSanPham) throw new Error("Tên sản phẩm không được để trống");
+    if (!donVi) throw new Error("Đơn vị không được để trống");
+    if (donGiaBan <= 0) throw new Error("Đơn giá bán phải lớn hơn 0");
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("SAN_PHAM");
+    if (!sheet) throw new Error("Không tìm thấy sheet SAN_PHAM");
+
+    var dataStartRow = 3;
+    var sourceRow = findProductRowByKey_(sheet, dataStartRow, originalTenSanPham, originalDonVi);
+    if (!sourceRow) throw new Error("Không tìm thấy sản phẩm để cập nhật");
+
+    var targetRow = sourceRow;
+    var oldKey = buildProductKey_(originalTenSanPham, originalDonVi);
+    var newKey = buildProductKey_(tenSanPham, donVi);
+    if (newKey !== oldKey) {
+      var matchedRow = findProductRowByKey_(sheet, dataStartRow, tenSanPham, donVi);
+      if (matchedRow && matchedRow !== sourceRow) {
+        targetRow = matchedRow;
+      }
+    }
+
+    sheet.getRange(targetRow, 2, 1, 4).setValues([[tenSanPham, donVi, donGiaBan, giaVon]]);
+    if (targetRow !== sourceRow) {
+      sheet.deleteRow(sourceRow);
+      if (targetRow > sourceRow) targetRow = targetRow - 1;
+    }
+    updateSTT_(sheet, dataStartRow);
+    return { success: true, message: "Cập nhật sản phẩm thành công" };
+  } catch (e) {
+    return { success: false, message: "Lỗi: " + e.message };
+  }
+}
+
+function createProductCatalogItem(payload) {
+  try {
+    var p = payload || {};
+    var tenSanPham = String(p.tenSanPham || "").trim();
+    var donVi = String(p.donVi || "").trim();
+    var donGiaBan = Math.max(parseMoneyNumber_(p.donGiaBan), 0);
+    var giaVon = Math.max(parseMoneyNumber_(p.giaVon), 0);
+
+    if (!tenSanPham) throw new Error("Tên sản phẩm không được để trống");
+    if (!donVi) throw new Error("Đơn vị không được để trống");
+    if (donGiaBan <= 0) throw new Error("Đơn giá bán phải lớn hơn 0");
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("SAN_PHAM");
+    if (!sheet) throw new Error("Không tìm thấy sheet SAN_PHAM");
+
+    var dataStartRow = 3;
+    var existed = findProductRowByKey_(sheet, dataStartRow, tenSanPham, donVi);
+    if (existed) throw new Error("Sản phẩm với đơn vị này đã tồn tại");
+
+    var appendStartRow = getLastDataRowByCol_(sheet, 2, dataStartRow) + 1;
+    if (appendStartRow < dataStartRow) appendStartRow = dataStartRow;
+    if (appendStartRow > sheet.getMaxRows()) {
+      sheet.insertRowsAfter(sheet.getMaxRows(), appendStartRow - sheet.getMaxRows());
+    }
+
+    var templateRow = appendStartRow - 1;
+    if (templateRow >= dataStartRow) {
+      sheet
+        .getRange(templateRow, 1, 1, 6)
+        .copyTo(
+          sheet.getRange(appendStartRow, 1, 1, 6),
+          SpreadsheetApp.CopyPasteType.PASTE_FORMAT,
+          false,
+        );
+    }
+
+    sheet.getRange(appendStartRow, 2, 1, 5).setValues([[tenSanPham, donVi, donGiaBan, giaVon, ""]]);
+    updateSTT_(sheet, dataStartRow);
+    return { success: true, message: "Đã thêm sản phẩm thành công" };
+  } catch (e) {
+    return { success: false, message: "Lỗi: " + e.message };
+  }
+}
+
+function deleteProductCatalogItem(payload) {
+  try {
+    var p = payload || {};
+    var tenSanPham = String(p.tenSanPham || "").trim();
+    var donVi = String(p.donVi || "").trim();
+    if (!tenSanPham || !donVi) throw new Error("Thiếu tên sản phẩm hoặc đơn vị");
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("SAN_PHAM");
+    if (!sheet) throw new Error("Không tìm thấy sheet SAN_PHAM");
+
+    var dataStartRow = 3;
+    var row = findProductRowByKey_(sheet, dataStartRow, tenSanPham, donVi);
+    if (!row) throw new Error("Không tìm thấy sản phẩm để xóa");
+
+    sheet.deleteRow(row);
+    if (sheet.getLastRow() >= dataStartRow) updateSTT_(sheet, dataStartRow);
+    return { success: true, message: "Đã xóa sản phẩm" };
+  } catch (e) {
+    return { success: false, message: "Lỗi: " + e.message };
+  }
+}
+
 function isGuestCustomerName_(name) {
   var folded = normalizeCompareText_(name);
   return folded === "khach ghe tham";
@@ -550,6 +678,421 @@ function getCustomerCatalog() {
   }
 }
 
+function getDebtCustomers() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("KHACH");
+    if (!sheet) throw new Error("Không tìm thấy sheet KHACH");
+
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 3) return { success: true, data: [] };
+
+    // A:H = STT | TÊN KHÁCH | NGÀY BÁN | SĐT | MÃ PHIẾU | TIỀN NỢ | TRẠNG THÁI | GHI CHÚ
+    var rows = sheet.getRange(3, 1, lastRow - 2, 8).getDisplayValues();
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var maPhieu = String(row[4] || "").trim();
+      if (!maPhieu) continue;
+      out.push({
+        stt: parseMoneyNumber_(row[0]),
+        tenKhach: String(row[1] || "").trim() || "Khách ghé thăm",
+        ngayBan: String(row[2] || "").trim(),
+        soDienThoai: String(row[3] || "").trim(),
+        maPhieu: maPhieu,
+        tienNo: parseMoneyNumber_(row[5]),
+        trangThai: String(row[6] || "").trim() || "Đã thanh toán",
+        ghiChu: String(row[7] || "").trim() || "-",
+      });
+    }
+    return { success: true, data: out };
+  } catch (e) {
+    return { success: false, message: "Lỗi: " + e.message, data: [] };
+  }
+}
+
+function findCustomerRowByOrderCode_(sheetKH, maPhieu) {
+  var key = String(maPhieu || "").trim();
+  if (!key) return 0;
+  var lastRow = sheetKH.getLastRow();
+  if (lastRow < 3) return 0;
+  var values = sheetKH.getRange(3, 5, lastRow - 2, 1).getDisplayValues();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0] || "").trim() === key) return i + 3;
+  }
+  return 0;
+}
+
+function updateDebtCustomer(payload) {
+  try {
+    var input = payload || {};
+    var maPhieuOriginal = String(input.maPhieuOriginal || input.maPhieu || "").trim();
+    if (!maPhieuOriginal) throw new Error("Thiếu mã phiếu gốc");
+
+    var tenKhach = String(input.tenKhach || "").trim() || "Khách ghé thăm";
+    var ngayBan = String(input.ngayBan || "").trim();
+    var soDienThoai = normalizePhoneForSheet_(input.soDienThoai || "");
+    var maPhieu = String(input.maPhieu || "").trim() || maPhieuOriginal;
+    var tienNo = Math.max(parseMoneyNumber_(input.tienNo), 0);
+    var ghiChu = String(input.ghiChu || "-").trim() || "-";
+    var normalizedStatus = normalizeOrderStatus_(input.trangThai);
+    var statusRule = buildStatusValidationRule_();
+    var statusValue = resolveStatusForRule_(normalizedStatus, statusRule);
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetKH = ss.getSheetByName("KHACH");
+    var sheetDH = ss.getSheetByName("DON_HANG");
+    if (!sheetKH) throw new Error("Không tìm thấy sheet KHACH");
+    if (!sheetDH) throw new Error("Không tìm thấy sheet DON_HANG");
+
+    var rowKH = findCustomerRowByOrderCode_(sheetKH, maPhieuOriginal);
+    if (!rowKH) throw new Error("Không tìm thấy dữ liệu khách hàng để cập nhật");
+
+    sheetKH.getRange(rowKH, 2, 1, 6).setValues([
+      [tenKhach, ngayBan, soDienThoai, maPhieu, tienNo, statusValue],
+    ]);
+    sheetKH.getRange(rowKH, 7).setDataValidation(statusRule);
+    sheetKH.getRange(rowKH, 8).setValue(ghiChu);
+
+    clearOrderMerges_(sheetDH);
+    var mapped = getEffectiveOrderRows_(sheetDH, 3);
+    var targetRows = [];
+    for (var i = 0; i < mapped.length; i++) {
+      if (mapped[i].effectiveMaPhieu === maPhieuOriginal) targetRows.push(mapped[i].row);
+    }
+    for (var j = 0; j < targetRows.length; j++) {
+      var r = targetRows[j];
+      // B: NGÀY BÁN, C: MÃ PHIẾU, K: GHI CHÚ, L: TRẠNG THÁI
+      sheetDH.getRange(r, 2, 1, 2).setValues([[ngayBan, maPhieu]]);
+      sheetDH.getRange(r, 11).setValue(ghiChu);
+      sheetDH.getRange(r, 12).setDataValidation(statusRule).setValue(statusValue);
+    }
+    if (sheetDH.getLastRow() >= 3) rebuildOrderMerges_(sheetDH);
+    updateSTT_(sheetKH, 3);
+
+    return { success: true, message: "Cập nhật công nợ thành công" };
+  } catch (e) {
+    return { success: false, message: "Lỗi: " + e.message };
+  }
+}
+
+function settleAllDebtCustomers() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetKH = ss.getSheetByName("KHACH");
+    var sheetDH = ss.getSheetByName("DON_HANG");
+    if (!sheetKH) throw new Error("Không tìm thấy sheet KHACH");
+    if (!sheetDH) throw new Error("Không tìm thấy sheet DON_HANG");
+
+    var lastRowKH = sheetKH.getLastRow();
+    if (lastRowKH < 3) {
+      return { success: true, message: "Không có dữ liệu công nợ để cập nhật", data: { affected: 0 } };
+    }
+
+    var rows = sheetKH.getRange(3, 1, lastRowKH - 2, 8).getDisplayValues();
+    var statusRule = buildStatusValidationRule_();
+    var paidStatus = resolveStatusForRule_("Đã thanh toán", statusRule);
+    var changedOrderCodes = {};
+    var affected = 0;
+
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var rowNum = i + 3;
+      var maPhieu = String(row[4] || "").trim();
+      if (!maPhieu) continue;
+      var tienNo = parseMoneyNumber_(row[5]);
+      var statusKey = getStatusKey_(row[6]);
+      if (statusKey === "DEBT" || statusKey === "PARTIAL" || tienNo > 0) {
+        sheetKH.getRange(rowNum, 6, 1, 2).setValues([[0, paidStatus]]);
+        sheetKH.getRange(rowNum, 7).setDataValidation(statusRule);
+        changedOrderCodes[maPhieu] = true;
+        affected++;
+      }
+    }
+
+    if (!affected) {
+      return { success: true, message: "Không có khách nào đang nợ để cập nhật", data: { affected: 0 } };
+    }
+
+    clearOrderMerges_(sheetDH);
+    var mappedRows = getEffectiveOrderRows_(sheetDH, 3);
+    for (var j = 0; j < mappedRows.length; j++) {
+      var info = mappedRows[j];
+      if (!changedOrderCodes[info.effectiveMaPhieu]) continue;
+      sheetDH.getRange(info.row, 12).setDataValidation(statusRule).setValue(paidStatus);
+    }
+    if (sheetDH.getLastRow() >= 3) rebuildOrderMerges_(sheetDH);
+    updateSTT_(sheetKH, 3);
+
+    return {
+      success: true,
+      message: "Đã cập nhật nhanh công nợ thành công",
+      data: { affected: affected },
+    };
+  } catch (e) {
+    return { success: false, message: "Lỗi: " + e.message };
+  }
+}
+
+function getOrderHistory() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("DON_HANG");
+    if (!sheet) throw new Error("Không tìm thấy sheet DON_HANG");
+
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 3) return { success: true, data: [] };
+
+    // A:L = STT, NGÀY BÁN, MÃ PHIẾU, TÊN SẢN PHẨM, ĐƠN VỊ, SỐ LƯỢNG, GIÁ VỐN, ĐƠN GIÁ BÁN, THÀNH TIỀN, TỔNG HÓA ĐƠN, GHI CHÚ, TRẠNG THÁI
+    var rows = sheet.getRange(3, 1, lastRow - 2, 12).getDisplayValues();
+
+    var customerByMaPhieu = {};
+    var phoneByMaPhieu = {};
+    var debtByMaPhieu = {};
+    var sheetKH = ss.getSheetByName("KHACH");
+    if (sheetKH) {
+      var lastRowKH = sheetKH.getLastRow();
+      if (lastRowKH >= 3) {
+        // B:F = TÊN KHÁCH, NGÀY BÁN, SĐT, MÃ PHIẾU, TIỀN NỢ
+        var khRows = sheetKH.getRange(3, 2, lastRowKH - 2, 5).getDisplayValues();
+        for (var c = 0; c < khRows.length; c++) {
+          var tenKhach = String(khRows[c][0] || "").trim();
+          var maPhieuKH = String(khRows[c][3] || "").trim();
+          var tienNoKH = parseMoneyNumber_(khRows[c][4]);
+          if (!maPhieuKH || !tenKhach) continue;
+          if (!customerByMaPhieu[maPhieuKH]) {
+            customerByMaPhieu[maPhieuKH] = tenKhach;
+          }
+          if (!phoneByMaPhieu[maPhieuKH]) {
+            phoneByMaPhieu[maPhieuKH] = String(khRows[c][2] || "").trim();
+          }
+          if (debtByMaPhieu[maPhieuKH] == null) {
+            debtByMaPhieu[maPhieuKH] = tienNoKH;
+          }
+        }
+      }
+    }
+    var orderMap = {};
+    var orderList = [];
+
+    var carryNgayBan = "";
+    var carryMaPhieu = "";
+    var carryTongHoaDon = "";
+    var carryGhiChu = "";
+    var carryTrangThai = "";
+
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var ngayBan = String(row[1] || "").trim() || carryNgayBan;
+      var maPhieu = String(row[2] || "").trim() || carryMaPhieu;
+      var tenSanPham = String(row[3] || "").trim();
+      var donVi = String(row[4] || "").trim();
+      var soLuong = parseMoneyNumber_(row[5]);
+      var giaVon = parseMoneyNumber_(row[6]);
+      var donGiaBan = parseMoneyNumber_(row[7]);
+      var thanhTien = parseMoneyNumber_(row[8]);
+      var tongHoaDonCell = String(row[9] || "").trim() || carryTongHoaDon;
+      var ghiChu = String(row[10] || "").trim() || carryGhiChu;
+      var trangThai = String(row[11] || "").trim() || carryTrangThai;
+
+      if (ngayBan) carryNgayBan = ngayBan;
+      if (maPhieu) carryMaPhieu = maPhieu;
+      if (tongHoaDonCell) carryTongHoaDon = tongHoaDonCell;
+      if (ghiChu) carryGhiChu = ghiChu;
+      if (trangThai) carryTrangThai = trangThai;
+
+      if (!maPhieu || !tenSanPham) continue;
+
+      var key = maPhieu;
+      if (!orderMap[key]) {
+        orderMap[key] = {
+          maPhieu: maPhieu,
+          ngayBan: ngayBan,
+          tenKhach: customerByMaPhieu[maPhieu] || "Khách ghé thăm",
+          soDienThoai: phoneByMaPhieu[maPhieu] || "",
+          tienNo: debtByMaPhieu[maPhieu] == null ? 0 : debtByMaPhieu[maPhieu],
+          tongHoaDon: parseMoneyNumber_(tongHoaDonCell),
+          ghiChu: ghiChu || "-",
+          trangThai: trangThai || "Đã thanh toán",
+          products: [],
+          _index: i,
+        };
+        orderList.push(orderMap[key]);
+      }
+
+      orderMap[key].products.push({
+        tenSanPham: tenSanPham,
+        donVi: donVi,
+        soLuong: soLuong,
+        giaVon: giaVon,
+        donGiaBan: donGiaBan,
+        thanhTien: thanhTien,
+      });
+    }
+
+    for (var j = 0; j < orderList.length; j++) {
+      if (!orderList[j].tongHoaDon || orderList[j].tongHoaDon <= 0) {
+        orderList[j].tongHoaDon = orderList[j].products.reduce(function(sum, p) {
+          return sum + (p.thanhTien || 0);
+        }, 0);
+      }
+      delete orderList[j]._index;
+    }
+
+    return { success: true, data: orderList };
+  } catch (e) {
+    return { success: false, message: "Lỗi: " + e.message, data: [] };
+  }
+}
+
+function getEffectiveOrderRows_(sheet, dataStartRow) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < dataStartRow) return [];
+  var rows = sheet.getRange(dataStartRow, 1, lastRow - dataStartRow + 1, 12).getDisplayValues();
+  var out = [];
+  var carryMaPhieu = "";
+  for (var i = 0; i < rows.length; i++) {
+    var maPhieu = String(rows[i][2] || "").trim() || carryMaPhieu;
+    if (String(rows[i][2] || "").trim()) carryMaPhieu = String(rows[i][2] || "").trim();
+    out.push({
+      row: dataStartRow + i,
+      effectiveMaPhieu: maPhieu,
+    });
+  }
+  return out;
+}
+
+function clearOrderMerges_(sheet) {
+  var dataStartRow = 3;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < dataStartRow) return;
+  var lastCol = sheet.getLastColumn();
+  if (lastCol < 1) return;
+  // Break all merged ranges in data area to avoid partial-merge write errors.
+  var merged = sheet
+    .getRange(dataStartRow, 1, lastRow - dataStartRow + 1, lastCol)
+    .getMergedRanges();
+  for (var i = 0; i < merged.length; i++) {
+    merged[i].breakApart();
+  }
+}
+
+function rebuildOrderMerges_(sheet) {
+  var dataStartRow = 3;
+  var rows = getEffectiveOrderRows_(sheet, dataStartRow);
+  if (!rows.length) return;
+  var mergeCols = [2, 3, 10, 11, 12];
+  var start = 0;
+  while (start < rows.length) {
+    var end = start;
+    while (end + 1 < rows.length && rows[end + 1].effectiveMaPhieu === rows[start].effectiveMaPhieu) {
+      end++;
+    }
+    var rowCount = end - start + 1;
+    if (rowCount > 1 && rows[start].effectiveMaPhieu) {
+      for (var c = 0; c < mergeCols.length; c++) {
+        var range = sheet.getRange(rows[start].row, mergeCols[c], rowCount, 1);
+        range.mergeVertically();
+        range.setVerticalAlignment("middle");
+      }
+    }
+    start = end + 1;
+  }
+}
+
+function deleteRowsByOrderCode_(sheetDH, maPhieu, options) {
+  options = options || {};
+  var key = String(maPhieu || "").trim();
+  if (!key) return 0;
+  clearOrderMerges_(sheetDH);
+  var mappedRows = getEffectiveOrderRows_(sheetDH, 3);
+  var targetRows = [];
+  for (var i = 0; i < mappedRows.length; i++) {
+    if (mappedRows[i].effectiveMaPhieu === key) targetRows.push(mappedRows[i].row);
+  }
+  for (var j = targetRows.length - 1; j >= 0; j--) {
+    sheetDH.deleteRow(targetRows[j]);
+  }
+  if (sheetDH.getLastRow() >= 3) {
+    updateSTT_(sheetDH, 3);
+    if (!options.skipRebuildMerges) rebuildOrderMerges_(sheetDH);
+  }
+  return targetRows.length;
+}
+
+function deleteCustomerRowsByOrderCode_(sheetKH, maPhieu) {
+  var key = String(maPhieu || "").trim();
+  if (!key) return 0;
+  var lastRow = sheetKH.getLastRow();
+  if (lastRow < 3) return 0;
+  var values = sheetKH.getRange(3, 5, lastRow - 2, 1).getDisplayValues();
+  var rows = [];
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0] || "").trim() === key) rows.push(i + 3);
+  }
+  for (var j = rows.length - 1; j >= 0; j--) {
+    sheetKH.deleteRow(rows[j]);
+  }
+  if (sheetKH.getLastRow() >= 3) updateSTT_(sheetKH, 3);
+  return rows.length;
+}
+
+function deleteOrder(maPhieu) {
+  try {
+    var key = String(maPhieu || "").trim();
+    if (!key) throw new Error("Thiếu mã phiếu");
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetDH = ss.getSheetByName("DON_HANG");
+    var sheetKH = ss.getSheetByName("KHACH");
+    if (!sheetDH) throw new Error("Không tìm thấy sheet DON_HANG");
+    if (!sheetKH) throw new Error("Không tìm thấy sheet KHACH");
+
+    var deletedDH = deleteRowsByOrderCode_(sheetDH, key);
+    var deletedKH = deleteCustomerRowsByOrderCode_(sheetKH, key);
+    if (deletedDH === 0 && deletedKH === 0) {
+      return { success: false, message: "Không tìm thấy hóa đơn để xóa" };
+    }
+    return { success: true, message: "Đã xóa hóa đơn thành công" };
+  } catch (e) {
+    return { success: false, message: "Lỗi: " + e.message };
+  }
+}
+
+function updateOrder(payload) {
+  try {
+    var maPhieuOriginal = String((payload && payload.maPhieuOriginal) || "").trim();
+    if (!maPhieuOriginal) throw new Error("Thiếu mã phiếu gốc");
+    var orderInfo = (payload && payload.orderInfo) || {};
+    var products = (payload && payload.products) || [];
+    if (!products.length) throw new Error("Đơn hàng phải có ít nhất một sản phẩm");
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetDH = ss.getSheetByName("DON_HANG");
+    var sheetKH = ss.getSheetByName("KHACH");
+    if (!sheetDH) throw new Error("Không tìm thấy sheet DON_HANG");
+    if (!sheetKH) throw new Error("Không tìm thấy sheet KHACH");
+
+    var existedRows = getEffectiveOrderRows_(sheetDH, 3).filter(function (r) {
+      return r.effectiveMaPhieu === maPhieuOriginal;
+    }).length;
+    if (!existedRows) throw new Error("Không tìm thấy hóa đơn để cập nhật");
+
+    deleteRowsByOrderCode_(sheetDH, maPhieuOriginal, { skipRebuildMerges: true });
+    deleteCustomerRowsByOrderCode_(sheetKH, maPhieuOriginal);
+
+    var orderData = {
+      customer: payload.customer || null,
+      orderInfo: orderInfo,
+      products: products,
+    };
+    var createResult = createOrder(orderData, { skipClearMerges: true });
+    if (!createResult || !createResult.success) return createResult;
+    return { success: true, message: "Cập nhật hóa đơn thành công!" };
+  } catch (e) {
+    return { success: false, message: "Lỗi: " + e.message };
+  }
+}
+
 /**
  * Auto cập nhật STT (cột A) cho sheet, bắt đầu từ dataStartRow.
  * STT = 1, 2, 3, ... cho mỗi dòng có dữ liệu.
@@ -558,9 +1101,25 @@ function updateSTT_(sheet, dataStartRow) {
   var lastRow = sheet.getLastRow();
   if (lastRow < dataStartRow) return;
   var numRows = lastRow - dataStartRow + 1;
-  var sttValues = [];
-  for (var i = 1; i <= numRows; i++) {
-    sttValues.push([i]);
+  var rowValues = sheet.getRange(dataStartRow, 1, numRows, sheet.getLastColumn()).getDisplayValues();
+  var sttValues = new Array(numRows);
+  var stt = 0;
+  for (var i = 0; i < numRows; i++) {
+    var row = rowValues[i];
+    // A is STT itself, so detect actual data from column B onward.
+    var hasData = false;
+    for (var c = 1; c < row.length; c++) {
+      if (String(row[c] || "").trim()) {
+        hasData = true;
+        break;
+      }
+    }
+    if (hasData) {
+      stt++;
+      sttValues[i] = [stt];
+    } else {
+      sttValues[i] = [""];
+    }
   }
   sheet.getRange(dataStartRow, 1, numRows, 1).setValues(sttValues);
 }
@@ -599,6 +1158,7 @@ function normalizeCompareText_(value) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
@@ -725,8 +1285,9 @@ function mergeOrderSharedColumns_(sheet, startRow, rowCount) {
   }
 }
 
-function createOrder(orderData) {
+function createOrder(orderData, options) {
   try {
+    options = options || {};
     var ss = SpreadsheetApp.getActiveSpreadsheet();
 
     // === 1. Ghi vào sheet DON_HANG ===
@@ -752,53 +1313,48 @@ function createOrder(orderData) {
     var statusRuleDH = buildStatusValidationRule_();
     var statusForDH = resolveStatusForRule_(normalizedStatus, statusRuleDH);
 
-    // Chèn từ dưới lên (reverse) để giữ thứ tự sản phẩm đúng khi insert ở đầu
-    var reversedProducts = products.slice().reverse();
+    if (!options.skipClearMerges) {
+      // Always unmerge existing data area before inserting/writing new rows.
+      clearOrderMerges_(sheetDH);
+    }
 
-    for (var i = 0; i < reversedProducts.length; i++) {
-      var p = reversedProducts[i];
+    // Batch insert/write rows to reduce API calls and speed up updates.
+    var rowCount = products.length;
+    sheetDH.insertRowsBefore(3, rowCount);
+    var orderRows = [];
+    var statusRows = [];
+    for (var i = 0; i < products.length; i++) {
+      var p = products[i];
       var thanhTien = (p.soLuong || 0) * (p.donGiaBan || 0);
       var giaVon = p.giaVon || 0;
-      var isFirst = i === reversedProducts.length - 1;
-
-      // insertRowBefore(3) — kế thừa format từ dòng data bên dưới
-      sheetDH.insertRowBefore(3);
-      try {
-        sheetDH.getRange(3, 1, 1, 12).setValues([
-          [
-            "", // A: STT (auto cập nhật sau)
-            ngayBan, // B: NGÀY BÁN
-            orderInfo.maPhieu || "", // C: MÃ PHIẾU
-            p.tenSanPham || "", // D: TÊN SẢN PHẨM
-            p.donVi || "", // E: ĐƠN VỊ
-            p.soLuong || 0, // F: SỐ LƯỢNG
-            giaVon, // G: GIÁ VỐN
-            p.donGiaBan || 0, // H: ĐƠN GIÁ BÁN
-            thanhTien, // I: THÀNH TIỀN
-            isFirst ? tongHoaDon : "", // J: TỔNG HÓA ĐƠN
-            isFirst ? orderInfo.ghiChu || "-" : "-", // K: GHI CHÚ
-            statusForDH, // L: TRẠNG THÁI
-          ],
-        ]);
-      } catch (rowWriteErr) {
-        // Fallback nếu cột trạng thái bị chặn bởi data validation.
-        sheetDH.getRange(3, 1, 1, 11).setValues([
-          [
-            "",
-            ngayBan,
-            orderInfo.maPhieu || "",
-            p.tenSanPham || "",
-            p.donVi || "",
-            p.soLuong || 0,
-            giaVon,
-            p.donGiaBan || 0,
-            thanhTien,
-            isFirst ? tongHoaDon : "",
-            isFirst ? orderInfo.ghiChu || "-" : "-",
-          ],
-        ]);
-        setStatusValidationAndValue_(sheetDH, 3, 12, statusForDH, statusRuleDH);
-      }
+      var isFirst = i === 0;
+      orderRows.push([
+        "",
+        ngayBan,
+        orderInfo.maPhieu || "",
+        p.tenSanPham || "",
+        p.donVi || "",
+        p.soLuong || 0,
+        giaVon,
+        p.donGiaBan || 0,
+        thanhTien,
+        isFirst ? tongHoaDon : "",
+        isFirst ? orderInfo.ghiChu || "-" : "-",
+        statusForDH,
+      ]);
+      statusRows.push([statusForDH]);
+    }
+    try {
+      sheetDH.getRange(3, 1, rowCount, 12).setValues(orderRows);
+    } catch (rowWriteErr) {
+      // Fallback nếu cột trạng thái bị chặn bởi data validation.
+      sheetDH.getRange(3, 1, rowCount, 11).setValues(
+        orderRows.map(function(r) {
+          return r.slice(0, 11);
+        })
+      );
+      applyKnownStatusValidation_(sheetDH, 3, rowCount, 12, statusRuleDH);
+      sheetDH.getRange(3, 12, rowCount, 1).setValues(statusRows);
     }
 
     // Auto cập nhật STT cho DON_HANG (data bắt đầu từ row 3)
@@ -809,11 +1365,12 @@ function createOrder(orderData) {
       applyKnownStatusValidation_(
         sheetDH,
         3,
-        reversedProducts.length,
+        rowCount,
         statusColDH,
         statusRuleDH,
       );
-      mergeOrderSharedColumns_(sheetDH, 3, reversedProducts.length);
+      // Rebuild merge blocks for all orders by maPhieu (preserves grouping logic).
+      rebuildOrderMerges_(sheetDH);
     } catch (formatErr) {
       Logger.log("WARN createOrder format skipped: " + formatErr.message);
     }
@@ -892,7 +1449,16 @@ const getDemoAccountsClient = () => call("getDemoAccounts");
 const getGlobalNoticeClient = () => call("getGlobalNotice");
 const getNextOrderFormDefaultsClient = () => call("getNextOrderFormDefaults");
 const getProductCatalogClient = () => call("getProductCatalog");
+const updateProductCatalogItemClient = (payload) => call("updateProductCatalogItem", payload);
+const createProductCatalogItemClient = (payload) => call("createProductCatalogItem", payload);
+const deleteProductCatalogItemClient = (payload) => call("deleteProductCatalogItem", payload);
 const getCustomerCatalogClient = () => call("getCustomerCatalog");
+const getDebtCustomersClient = () => call("getDebtCustomers");
+const updateDebtCustomerClient = (payload) => call("updateDebtCustomer", payload);
+const settleAllDebtCustomersClient = () => call("settleAllDebtCustomers");
+const getOrderHistoryClient = () => call("getOrderHistory");
+const updateOrderClient = (payload) => call("updateOrder", payload);
+const deleteOrderClient = (maPhieu) => call("deleteOrder", maPhieu);
 
 export const gasAdapter = {
   call,
@@ -903,6 +1469,15 @@ export const gasAdapter = {
   getGlobalNotice: getGlobalNoticeClient,
   getNextOrderFormDefaults: getNextOrderFormDefaultsClient,
   getProductCatalog: getProductCatalogClient,
+  updateProductCatalogItem: updateProductCatalogItemClient,
+  createProductCatalogItem: createProductCatalogItemClient,
+  deleteProductCatalogItem: deleteProductCatalogItemClient,
   getCustomerCatalog: getCustomerCatalogClient,
+  getDebtCustomers: getDebtCustomersClient,
+  updateDebtCustomer: updateDebtCustomerClient,
+  settleAllDebtCustomers: settleAllDebtCustomersClient,
+  getOrderHistory: getOrderHistoryClient,
   createOrder: (orderData) => call("createOrder", orderData),
+  updateOrder: updateOrderClient,
+  deleteOrder: deleteOrderClient,
 };

@@ -1,8 +1,10 @@
 ﻿import { useState, useEffect } from "react"
 import { login, call } from "../api/index.js"
 import { getNextOrderFormDefaults } from "../api"
+import brandLogo from "../assets/logo-dulia.jpg"
 
 const ORDER_DEFAULTS_CACHE_KEY = "soanhang.orderDefaults"
+const BRAND_LOGO_URL = brandLogo
 
 const prefetchOrderDefaults = async () => {
   try {
@@ -76,22 +78,29 @@ export default function LoginPage({ onLoginSuccess }) {
     <div className="min-h-screen flex items-start md:items-center justify-center p-4 md:p-6 pb-20 bg-slate-100 font-sans text-slate-800">
       <div className="w-full max-w-md rounded-2xl px-9 py-10 bg-white border border-slate-200 shadow-xl shadow-slate-200/50 animate-[fadeUp_0.4s_ease]">
         <div className="text-center mb-8">
-          <span className="text-5xl block mb-3 animate-[pulseglow_3s_ease-in-out_infinite]">⚡</span>
-          <h1 className="text-3xl font-bold bg-gradient-to-br from-rose-700 to-rose-900 bg-clip-text text-transparent">GAS Demo</h1>
-          <p className="text-sm mt-1 text-slate-500">Môi trường kiểm thử Script</p>
+          <img
+            src={BRAND_LOGO_URL}
+            alt="Dulia logo"
+            className="mx-auto mt-4 mb-3 h-24 w-24 rounded-2xl object-cover"
+            loading="eager"
+            fetchPriority="high"
+          />
+          <h1 className="text-3xl font-bold bg-gradient-to-br from-rose-700 to-rose-900 bg-clip-text text-transparent">DULI Accounting</h1>
+          <p className="text-sm mt-1 text-slate-500">Hệ thống dành riêng cho bạn</p>
         </div>
 
         <form onSubmit={handleLogin} className="flex flex-col gap-5">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Email</label>
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Tài khoản</label>
             <div className="relative flex items-center">
               <span className="absolute left-3 text-sm text-slate-400">✉️</span>
               <input
                 id="email"
-                type="email"
+                type="text"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="your@email.com"
+                placeholder="Nhập tài khoản"
+                autoComplete="username"
                 className="w-full pl-9 pr-4 py-3 rounded-lg text-sm bg-slate-50 border border-slate-300 text-slate-800 focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 transition-all"
               />
             </div>
@@ -162,3 +171,6 @@ export default function LoginPage({ onLoginSuccess }) {
     </div>
   )
 }
+
+
+

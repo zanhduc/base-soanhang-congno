@@ -2,9 +2,13 @@
 import LoginPage from "./pages/login"
 import DashboardPage from "./pages/dashboard"
 import CreateOrderPage from "./pages/create-order"
+import HistoryPage from "./pages/history"
+import ProductsPage from "./pages/products"
+import DebtPage from "./pages/debt"
 import FloatingMenu from "./components/FloatingMenu"
 import GlobalNoticeBanner from "./components/GlobalNoticeBanner"
 import { UserProvider, useUser } from "./context"
+import { Toaster } from "react-hot-toast"
 
 function AppContent() {
   const { user, setUser, logout } = useUser()
@@ -24,9 +28,11 @@ function AppContent() {
         case "create-order":
           return <CreateOrderPage user={user} />
         case "history":
-          return <div className="p-8 text-center text-slate-500 mt-20">Lịch sử đơn hàng (Sắp có)</div>
+          return <HistoryPage user={user} />
+        case "products":
+          return <ProductsPage user={user} />
         case "debt":
-          return <div className="p-8 text-center text-slate-500 mt-20">Công nợ khách hàng (Sắp có)</div>
+          return <DebtPage user={user} />
         case "dashboard":
           return (
             <div className="p-8 text-center mt-20">
@@ -48,7 +54,7 @@ function AppContent() {
     return (
       <div className="min-h-screen bg-slate-50">
         <GlobalNoticeBanner />
-        <div>{renderPage()}</div>
+        <div className="md:pl-72">{renderPage()}</div>
         <FloatingMenu currentPath={currentPath} onNavigate={setCurrentPath} />
       </div>
     )
@@ -60,6 +66,18 @@ function AppContent() {
 export default function App() {
   return (
     <UserProvider>
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 2500,
+          style: {
+            borderRadius: "12px",
+            border: "1px solid #f1f5f9",
+            background: "#ffffff",
+            color: "#0f172a",
+          },
+        }}
+      />
       <AppContent />
     </UserProvider>
   )
