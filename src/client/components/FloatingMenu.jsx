@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react"
+import { useState, useEffect } from "react"
 import { useUser } from "../context"
 import brandLogo from "../assets/logo-dulia.jpg"
 
@@ -41,11 +41,24 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
     return () => window.removeEventListener("click", close)
   }, [isOpen])
 
+  // Lấy cấu hình bật/tắt nhập kho từ localStorage, mặc định là false
+  const [showInventory, setShowInventory] = useState(() => {
+    return localStorage.getItem("enable_inventory") === "true"
+  })
+
+  const toggleInventory = () => {
+    const newState = !showInventory
+    setShowInventory(newState)
+    localStorage.setItem("enable_inventory", String(newState))
+  }
+
   const menuItems = [
     { id: "create-order", label: "Soạn đơn hàng", icon: "🧾" },
     { id: "history", label: "Lịch sử hóa đơn", icon: "🕘" },
     { id: "products", label: "Quản lý sản phẩm", icon: "📦" },
+    ...(showInventory ? [{ id: "inventory", label: "Nhập kho", icon: "📥" }] : []),
     { id: "debt", label: "Quản lý công nợ", icon: "📒" },
+    { id: "stats", label: "Thống kê", icon: "📊" },
   ]
 
   const handleNav = (id) => {
@@ -84,7 +97,7 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
                 alt="Dulia logo"
                 className="h-12 w-12 rounded-lg object-cover"
                 loading="eager"
-                fetchPriority="high"
+                fetchpriority="high"
               />
               <div className="min-w-0">
                 <p className="font-bold text-slate-800 truncate">{user.name || "Tài khoản của bạn"}</p>
@@ -115,7 +128,23 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
             })}
           </div>
 
-          <div className="p-2 border-t border-slate-100 bg-slate-50/50">
+          <div className="p-2 border-t border-slate-100 bg-slate-50/50 space-y-1">
+            <div className="px-3 py-2 flex items-center justify-between rounded-xl hover:bg-slate-100/50 transition-colors">
+              <span className="text-[13px] font-medium text-slate-600">Bật tính năng Nhập kho</span>
+              <button
+                onClick={toggleInventory}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  showInventory ? 'bg-emerald-500' : 'bg-slate-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                    showInventory ? 'translate-x-4.5' : 'translate-x-1'
+                  }`}
+                  style={{ transform: showInventory ? 'translateX(18px)' : 'translateX(4px)' }}
+                />
+              </button>
+            </div>
             <button
               onClick={logout}
               className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-red-600 font-semibold hover:bg-red-50 transition-colors text-sm"
@@ -134,7 +163,7 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
               alt="Dulia logo"
               className="h-16 w-16 rounded-xl object-cover"
               loading="eager"
-              fetchPriority="high"
+              fetchpriority="high"
             />
             <div className="min-w-0">
               <p className="font-bold text-slate-800 truncate">{user.name || "Tài khoản của bạn"}</p>
@@ -165,7 +194,23 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
           })}
         </div>
 
-        <div className="p-3 border-t border-slate-100 bg-slate-50/60">
+        <div className="p-3 border-t border-slate-100 bg-slate-50/60 space-y-2">
+          <div className="px-3 py-2 flex items-center justify-between rounded-xl hover:bg-slate-100/50 transition-colors">
+            <span className="text-[13px] font-medium text-slate-600">Bật tính năng Nhập kho</span>
+            <button
+              onClick={toggleInventory}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                showInventory ? 'bg-emerald-500' : 'bg-slate-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                  showInventory ? 'translate-x-4.5' : 'translate-x-1'
+                }`}
+                style={{ transform: showInventory ? 'translateX(18px)' : 'translateX(4px)' }}
+              />
+            </button>
+          </div>
           <button
             onClick={logout}
             className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-red-600 font-semibold hover:bg-red-50 transition-colors text-sm"

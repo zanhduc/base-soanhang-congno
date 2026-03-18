@@ -1,5 +1,5 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react"
-import { deleteOrder, getOrderHistory, getProductCatalog, updateOrder } from "../api"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { createReceiptPdf, deleteOrder, getCustomerCatalog, getOrderHistory, getProductCatalog, updateOrder } from "../api"
 import toast from "react-hot-toast"
 
 const fmt = (n) => Number(n || 0).toLocaleString()
@@ -12,6 +12,8 @@ const foldText = (v) =>
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .trim()
+
+const isGuestCustomer = (name) => foldText(name) === "khach ghe tham"
 
 const getStatusCode = (status) => {
   const key = foldText(status).replace(/\s+/g, " ")
@@ -151,6 +153,29 @@ const moneyMeaning = (value) => {
   return `${n.toLocaleString("vi-VN")} đồng`
 }
 
+const openReceiptPage = (order, size) => {
+  const maPhieu = String(order?.maPhieu || "").trim()
+  if (!maPhieu) {
+    toast.error("Không tìm thấy mã phiếu để in.")
+    return
+  }
+  const gasUrl = import.meta.env.VITE_GAS_WEBAPP_URL || ""
+  const isPdf = size === "pdf"
+  const baseUrl = isPdf && gasUrl ? gasUrl : `${window.location.origin}${window.location.pathname}`
+  if (isPdf && !baseUrl) {
+    toast.error("Thiếu VITE_GAS_WEBAPP_URL để mở PDF.")
+    return
+  }
+  const sizeParam =
+    size === "58" ? "&size=58" : size === "80" ? "&size=80" : size === "pdf" ? "&size=pdf" : ""
+  const keyParam = isPdf ? "printPdf" : "print"
+  const url = `${baseUrl}?${keyParam}=${encodeURIComponent(maPhieu)}${sizeParam}`
+  const win = window.open(url, "_blank", "width=420,height=700")
+  if (!win) {
+    toast.error("Trình duyệt đang chặn cửa sổ in hóa đơn.")
+  }
+}
+
 function MoneyInput({ value, onChange, placeholder }) {
   const [display, setDisplay] = useState(value ? fmt(value) : "")
 
@@ -188,7 +213,36 @@ function StatusBadge({ status }) {
 
 function HistoryCard({ order, deleting, onEdit, onDelete }) {
   const [open, setOpen] = useState(false)
+  const [printOpen, setPrintOpen] = useState(false)
   const isPartial = getStatusCode(order.trangThai) === "PARTIAL"
+
+  useEffect(() => {
+    const onEsc = (e) => {
+      if (e.key === "Escape") setPrintOpen(false)
+    }
+    if (printOpen) document.addEventListener("keydown", onEsc)
+    return () => document.removeEventListener("keydown", onEsc)
+  }, [printOpen])
+
+  const handlePrintPdf = async () => {
+    const maPhieu = String(order?.maPhieu || "").trim()
+    if (!maPhieu) {
+      toast.error("Không tìm thấy mã phiếu để in.")
+      return
+    }
+    const loadingId = toast.loading("Đang tạo PDF...")
+    try {
+      const res = await createReceiptPdf(maPhieu)
+      if (res?.success && res?.url) {
+        toast.success("Đã tạo PDF.", { id: loadingId })
+        window.open(res.url, "_blank")
+      } else {
+        toast.error(res?.message || "Tạo PDF thất bại.", { id: loadingId })
+      }
+    } catch (e) {
+      toast.error("Tạo PDF thất bại.", { id: loadingId })
+    }
+  }
 
   return (
     <article className="rounded-2xl border border-rose-200 bg-white p-4 md:p-5 shadow-sm">
@@ -262,6 +316,13 @@ function HistoryCard({ order, deleting, onEdit, onDelete }) {
           <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-3 py-2.5 bg-slate-50/60">
             <button
               type="button"
+              onClick={() => setPrintOpen(true)}
+              className="shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+            >
+              In hóa đơn
+            </button>
+            <button
+              type="button"
               onClick={onEdit}
               className="shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-white"
             >
@@ -278,11 +339,63 @@ function HistoryCard({ order, deleting, onEdit, onDelete }) {
           </div>
         </div>
       )}
+      {printOpen && (
+        <div className="fixed inset-0 z-[9900] bg-slate-900/40 p-4" onClick={() => setPrintOpen(false)}>
+          <div
+            className="mx-auto mt-[18vh] w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-bold text-slate-900">Chọn kiểu in hóa đơn</h3>
+            <p className="mt-1 text-sm text-slate-500">Mã phiếu: {order.maPhieu}</p>
+            <div className="mt-4 space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPrintOpen(false)
+                  handlePrintPdf()
+                }}
+                className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                In PDF (A4)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPrintOpen(false)
+                  openReceiptPage(order, "58")
+                }}
+                className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700"
+              >
+                In khổ 58mm (máy in nhiệt)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPrintOpen(false)
+                  openReceiptPage(order, "80")
+                }}
+                className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700"
+              >
+                In khổ 80mm (máy in nhiệt)
+              </button>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPrintOpen(false)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </article>
   )
 }
 
-function EditOrderModal({ order, saving, onClose, onSave, productCatalog }) {
+function EditOrderModal({ order, saving, onClose, onSave, productCatalog, customerCatalog }) {
   const [form, setForm] = useState(() => ({
     maPhieuOriginal: order.maPhieu,
     maPhieu: order.maPhieu,
@@ -297,6 +410,7 @@ function EditOrderModal({ order, saving, onClose, onSave, productCatalog }) {
         : 0,
     products: (order.products || []).map((p) => ({
       tenSanPham: p.tenSanPham || "",
+      nhomHang: p.nhomHang || "",
       donVi: p.donVi || "",
       soLuong: toNum(p.soLuong) || 1,
       giaVon: toNum(p.giaVon),
@@ -304,6 +418,7 @@ function EditOrderModal({ order, saving, onClose, onSave, productCatalog }) {
     })),
   }))
   const [suggestIndex, setSuggestIndex] = useState(-1)
+  const [showCustomerSuggest, setShowCustomerSuggest] = useState(false)
 
   const total = useMemo(
     () => form.products.reduce((sum, p) => sum + toNum(p.soLuong) * toNum(p.donGiaBan), 0),
@@ -330,6 +445,18 @@ function EditOrderModal({ order, saving, onClose, onSave, productCatalog }) {
     return (productCatalog || []).filter((p) => foldText(p.tenSanPham).includes(q)).slice(0, 8)
   }
 
+  const getCustomerSuggestions = (query) => {
+    const q = foldText(query)
+    if (!q) return (customerCatalog || []).filter((c) => !isGuestCustomer(c.tenKhach)).slice(0, 8)
+    return (customerCatalog || [])
+      .filter(
+        (c) =>
+          !isGuestCustomer(c.tenKhach) &&
+          (foldText(c.tenKhach).includes(q) || foldText(c.soDienThoai).includes(q)),
+      )
+      .slice(0, 8)
+  }
+
   return (
     <div className="fixed inset-0 z-[9800] bg-slate-900/45 p-3 md:p-6" onClick={onClose}>
       <div className="mx-auto max-w-3xl rounded-2xl bg-white shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -343,9 +470,49 @@ function EditOrderModal({ order, saving, onClose, onSave, productCatalog }) {
         <div className="p-4 md:p-5 space-y-4">
           <div className="grid gap-3 md:grid-cols-2">
             <input value={form.maPhieu} onChange={(e) => setForm((p) => ({ ...p, maPhieu: e.target.value }))} placeholder="Mã phiếu" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
-            <input type="date" value={form.ngayBan} onChange={(e) => setForm((p) => ({ ...p, ngayBan: e.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
-            <input value={form.tenKhach} onChange={(e) => setForm((p) => ({ ...p, tenKhach: e.target.value }))} placeholder="Tên khách (để trống = Khách ghé thăm)" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
-            <input value={form.soDienThoai} onChange={(e) => setForm((p) => ({ ...p, soDienThoai: e.target.value }))} placeholder="Số điện thoại" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
+            <input type="date" lang="en-GB" value={form.ngayBan} onChange={(e) => setForm((p) => ({ ...p, ngayBan: e.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
+            <div className="relative">
+              <input
+                value={form.tenKhach}
+                onChange={(e) => {
+                  setForm((p) => ({ ...p, tenKhach: e.target.value }))
+                  setShowCustomerSuggest(true)
+                }}
+                onFocus={() => setShowCustomerSuggest(true)}
+                onBlur={() => setTimeout(() => setShowCustomerSuggest(false), 120)}
+                placeholder="Tên khách (để trống = Khách ghé thăm)"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+              />
+              {showCustomerSuggest && getCustomerSuggestions(form.tenKhach).length > 0 && (
+                <div className="absolute z-40 mt-1 max-h-52 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+                  {getCustomerSuggestions(form.tenKhach).map((c) => (
+                    <button
+                      key={`${c.tenKhach}-${c.soDienThoai}`}
+                      type="button"
+                      onMouseDown={(ev) => ev.preventDefault()}
+                      onClick={() => {
+                        setForm((p) => ({
+                          ...p,
+                          tenKhach: c.tenKhach || "",
+                          soDienThoai: String(c.soDienThoai || ""),
+                        }))
+                        setShowCustomerSuggest(false)
+                      }}
+                      className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-rose-50"
+                    >
+                      <p className="text-sm font-semibold text-slate-800">{c.tenKhach}</p>
+                      <p className="text-xs text-slate-500">{c.soDienThoai || "-"}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <input
+              value={form.soDienThoai}
+              onChange={(e) => setForm((p) => ({ ...p, soDienThoai: e.target.value }))}
+              placeholder="Số điện thoại"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+            />
           </div>
 
           <div className="grid grid-cols-3 gap-2">
@@ -415,6 +582,7 @@ function EditOrderModal({ order, saving, onClose, onSave, productCatalog }) {
                             onClick={() => {
                               updateProduct(idx, {
                                 tenSanPham: sp.tenSanPham || "",
+                                nhomHang: sp.nhomHang || "",
                                 donVi: sp.donVi || "",
                                 donGiaBan: toNum(sp.donGiaBan),
                               })
@@ -423,7 +591,9 @@ function EditOrderModal({ order, saving, onClose, onSave, productCatalog }) {
                             className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-rose-50"
                           >
                             <p className="text-sm font-semibold text-slate-800">{sp.tenSanPham}</p>
-                            <p className="text-xs text-slate-500">{sp.donVi || "-"} | Bán {fmt(sp.donGiaBan || 0)}</p>
+                            <p className="text-xs text-slate-500">
+                              {(sp.nhomHang || "-")} • {sp.donVi || "-"} | Bán {fmt(sp.donGiaBan || 0)}
+                            </p>
                           </button>
                         ))}
                       </div>
@@ -448,7 +618,17 @@ function EditOrderModal({ order, saving, onClose, onSave, productCatalog }) {
               onClick={() =>
                 setForm((p) => ({
                   ...p,
-                  products: [...p.products, { tenSanPham: "", donVi: "", soLuong: 1, giaVon: 0, donGiaBan: 0 }],
+                  products: [
+                    ...p.products,
+                    {
+                      tenSanPham: "",
+                      nhomHang: "",
+                      donVi: "",
+                      soLuong: 1,
+                      giaVon: 0,
+                      donGiaBan: 0,
+                    },
+                  ],
                 }))
               }
               className="w-full rounded-xl border border-dashed border-slate-300 py-2 text-sm text-slate-600"
@@ -548,18 +728,18 @@ function FilterFields({ filters, setFilters, statusFilter, setStatusFilter }) {
     "w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
       <div>
         <label className="mb-1 block text-xs font-semibold text-slate-500 uppercase tracking-wide">Trạng thái</label>
         <StatusDropdown value={statusFilter} onChange={setStatusFilter} />
       </div>
       <div>
         <label className="mb-1 block text-xs font-semibold text-slate-500 uppercase tracking-wide">Từ ngày</label>
-        <input type="date" value={filters.fromDate} onChange={(e) => setFilters((p) => ({ ...p, fromDate: e.target.value }))} className={inputCls} />
+        <input type="date" lang="en-GB" value={filters.fromDate} onChange={(e) => setFilters((p) => ({ ...p, fromDate: e.target.value }))} className={inputCls} />
       </div>
       <div>
         <label className="mb-1 block text-xs font-semibold text-slate-500 uppercase tracking-wide">Đến ngày</label>
-        <input type="date" value={filters.toDate} onChange={(e) => setFilters((p) => ({ ...p, toDate: e.target.value }))} className={inputCls} />
+        <input type="date" lang="en-GB" value={filters.toDate} onChange={(e) => setFilters((p) => ({ ...p, toDate: e.target.value }))} className={inputCls} />
       </div>
       <div>
         <label className="mb-1 block text-xs font-semibold text-slate-500 uppercase tracking-wide">Tên khách</label>
@@ -581,6 +761,7 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true)
   const [orders, setOrders] = useState([])
   const [productCatalog, setProductCatalog] = useState([])
+  const [customerCatalog, setCustomerCatalog] = useState([])
   const [query, setQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("ALL")
   const [showMobileFilters, setShowMobileFilters] = useState(false)
@@ -606,6 +787,16 @@ export default function HistoryPage() {
     }
   }
 
+  const loadCustomerCatalog = async () => {
+    try {
+      const res = await getCustomerCatalog()
+      if (res?.success && Array.isArray(res.data)) setCustomerCatalog(res.data)
+      else setCustomerCatalog([])
+    } catch (e) {
+      setCustomerCatalog([])
+    }
+  }
+
   const loadHistory = async () => {
     setLoading(true)
     try {
@@ -627,7 +818,23 @@ export default function HistoryPage() {
   useEffect(() => {
     loadHistory()
     loadProductCatalog()
+    loadCustomerCatalog()
   }, [])
+
+  const enrichOrderForEdit = (order) => {
+    if (!order) return order
+    if (!productCatalog || productCatalog.length === 0) return order
+    const products = (order.products || []).map((p) => {
+      if (p.nhomHang) return p
+      const match = productCatalog.find(
+        (sp) =>
+          foldText(sp.tenSanPham) === foldText(p.tenSanPham) &&
+          foldText(sp.donVi) === foldText(p.donVi),
+      )
+      return { ...p, nhomHang: match ? match.nhomHang || "" : "" }
+    })
+    return { ...order, products }
+  }
 
   const dateSearchMeta = useMemo(() => getDateSearchMeta(query), [query])
 
@@ -674,6 +881,25 @@ export default function HistoryPage() {
       return true
     })
   }, [orders, filters, statusFilter, query, dateSearchMeta])
+
+  const totalRevenue = useMemo(
+    () => filteredOrders.reduce((sum, o) => sum + toNum(o.tongHoaDon), 0),
+    [filteredOrders],
+  )
+
+  const totalProfit = useMemo(
+    () =>
+      filteredOrders.reduce((sum, o) => {
+        const orderProfit = (o.products || []).reduce((acc, p) => {
+          const qty = toNum(p.soLuong)
+          const sell = toNum(p.donGiaBan)
+          const cost = toNum(p.giaVon)
+          return acc + (sell - cost) * qty
+        }, 0)
+        return sum + orderProfit
+      }, 0),
+    [filteredOrders],
+  )
 
   const resetFilters = () => {
     setFilters({ fromDate: "", toDate: "", tenKhach: "", maPhieu: "", tenSanPham: "" })
@@ -768,6 +994,21 @@ export default function HistoryPage() {
           <p className="mt-2 text-sm md:text-base text-slate-500">Tra cứu đơn hàng theo ngày, khách, mã phiếu và sản phẩm.</p>
         </div>
 
+        <section className="grid gap-3 md:grid-cols-2 mb-4">
+          <div className="rounded-2xl border border-rose-200 bg-rose-50/60 px-4 py-3 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Doanh thu</p>
+            <p className="mt-1 text-2xl font-black text-rose-700">{fmt(totalRevenue)}</p>
+            <p className="mt-1 text-xs text-rose-700">Theo bộ lọc hiện tại</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Lợi nhuận</p>
+            <p className={`mt-1 text-2xl font-black ${totalProfit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+              {fmt(totalProfit)}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">Chưa trừ chi phí khác</p>
+          </div>
+        </section>
+
         <section className="rounded-2xl border border-slate-200 bg-white p-4 md:p-5 shadow-sm mb-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm md:text-base font-bold text-slate-800">Bộ lọc đơn hàng</h2>
@@ -845,7 +1086,7 @@ export default function HistoryPage() {
                 key={`${order.maPhieu}-${idx}`}
                 order={order}
                 deleting={deletingCode === order.maPhieu}
-                onEdit={() => setEditingOrder(order)}
+                onEdit={() => setEditingOrder(enrichOrderForEdit(order))}
                 onDelete={() => handleDeleteOrder(order.maPhieu)}
               />
             ))}
@@ -858,6 +1099,7 @@ export default function HistoryPage() {
           order={editingOrder}
           saving={savingOrder}
           productCatalog={productCatalog}
+          customerCatalog={customerCatalog}
           onClose={() => (savingOrder ? null : setEditingOrder(null))}
           onSave={handleSaveOrder}
         />

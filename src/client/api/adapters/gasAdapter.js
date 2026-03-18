@@ -1,4 +1,4 @@
-﻿const IS_DEV = import.meta.env.DEV;
+const IS_DEV = import.meta.env.DEV;
 const GAS_WEBAPP_URL = import.meta.env.VITE_GAS_WEBAPP_URL ?? "";
 
 function gasRun(fnName, ...args) {
@@ -34,7 +34,11 @@ const call = (fnName, ...args) => {
 
 /* ── GAS Server Functions ── */
 
-function doGet() {
+function doGet(e) {
+  var params = (e && e.parameter) ? e.parameter : {};
+  if (params.printPdf) {
+    return buildReceiptPdf_(String(params.printPdf || "").trim());
+  }
   return HtmlService.createHtmlOutputFromFile("index")
     .setTitle("Soạn Hàng - Công Nợ")
     .addMetaTag(
@@ -350,6 +354,13 @@ function parseMoneyNumber_(value) {
   return isNaN(n) ? 0 : n;
 }
 
+function formatMoneyNumber_(value) {
+  var num = parseMoneyNumber_(value);
+  var n = Math.round(num);
+  var str = String(n);
+  return str.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
 function normalizeProductKeyPart_(value) {
   return String(value || "")
     .trim()
@@ -385,17 +396,19 @@ function syncProductCatalog_(ss, products) {
   var existingByKey = {};
 
   if (lastDataRow >= dataStartRow) {
-    // B:F = TEN SAN PHAM | DON VI | GIA | GIA VON | GHI CHU
+  // B:F = TEN SAN PHAM | NHOM HANG | DON VI | GIA | GIA VON
     var existing = sheetSP.getRange(dataStartRow, 2, lastDataRow - dataStartRow + 1, 5).getValues();
     for (var i = 0; i < existing.length; i++) {
       var row = existing[i];
       var tenSanPham = String(row[0] || "").trim();
-      var donVi = String(row[1] || "").trim();
+      var nhomHang = String(row[1] || "").trim();
+      var donVi = String(row[2] || "").trim();
       if (!tenSanPham || !donVi) continue;
       existingByKey[buildProductKey_(tenSanPham, donVi)] = {
         row: dataStartRow + i,
-        donGiaBan: parseMoneyNumber_(row[2]),
-        giaVon: parseMoneyNumber_(row[3]),
+        nhomHang: nhomHang,
+        donGiaBan: parseMoneyNumber_(row[3]),
+        giaVon: parseMoneyNumber_(row[4]),
       };
     }
   }
@@ -405,10 +418,12 @@ function syncProductCatalog_(ss, products) {
   for (var j = 0; j < products.length; j++) {
     var p = products[j] || {};
     var ten = String(p.tenSanPham || "").trim();
+    var nhom = String(p.nhomHang || "").trim();
     var dv = String(p.donVi || "").trim();
     if (!ten || !dv) continue;
     incomingByKey[buildProductKey_(ten, dv)] = {
       tenSanPham: ten,
+      nhomHang: nhom,
       donVi: dv,
       donGiaBan: parseMoneyNumber_(p.donGiaBan),
       giaVon: parseMoneyNumber_(p.giaVon),
@@ -425,22 +440,26 @@ function syncProductCatalog_(ss, products) {
     var matched = existingByKey[key];
 
     if (matched) {
+      if (!incomingProduct.nhomHang && matched.nhomHang) {
+        incomingProduct.nhomHang = matched.nhomHang;
+      }
       var changedPrice = Math.abs((matched.donGiaBan || 0) - (incomingProduct.donGiaBan || 0)) > 0.0001;
       var changedCost = Math.abs((matched.giaVon || 0) - (incomingProduct.giaVon || 0)) > 0.0001;
-      if (changedPrice || changedCost) {
+      var changedGroup = normalizeProductKeyPart_(matched.nhomHang || "") !== normalizeProductKeyPart_(incomingProduct.nhomHang || "");
+      if (changedPrice || changedCost || changedGroup) {
         sheetSP
-          .getRange(matched.row, 4, 1, 2)
-          .setValues([[incomingProduct.donGiaBan || 0, incomingProduct.giaVon || 0]]);
+          .getRange(matched.row, 3, 1, 4)
+          .setValues([[incomingProduct.nhomHang || "", incomingProduct.donVi || "", incomingProduct.donGiaBan || 0, incomingProduct.giaVon || 0]]);
         updated++;
       }
     } else {
       // Thêm mới nếu chưa có key name+unit (bao gồm case cùng tên nhưng khác đơn vị).
       inserts.push([
         incomingProduct.tenSanPham,
+        incomingProduct.nhomHang || "",
         incomingProduct.donVi,
         incomingProduct.donGiaBan || 0,
         incomingProduct.giaVon || 0,
-        "",
       ]);
     }
   }
@@ -457,10 +476,11 @@ function syncProductCatalog_(ss, products) {
     // New rows should inherit visual style from the previous product row.
     var templateRow = appendStartRow - 1;
     if (templateRow >= dataStartRow) {
+      var templateCols = Math.max(6, sheetSP.getLastColumn());
       sheetSP
-        .getRange(templateRow, 1, 1, 6)
+        .getRange(templateRow, 1, 1, templateCols)
         .copyTo(
-          sheetSP.getRange(appendStartRow, 1, inserts.length, 6),
+          sheetSP.getRange(appendStartRow, 1, inserts.length, templateCols),
           SpreadsheetApp.CopyPasteType.PASTE_FORMAT,
           false,
         );
@@ -485,8 +505,8 @@ function getProductCatalog() {
       return { success: true, data: [] };
     }
 
-    // B:E = TEN SAN PHAM | DON VI | GIA | GIA VON
-    var values = sheet.getRange(3, 2, lastRow - 2, 4).getDisplayValues();
+    // B:F = TEN SAN PHAM | NHOM HANG | DON VI | GIA | GIA VON
+    var values = sheet.getRange(3, 2, lastRow - 2, 5).getDisplayValues();
     var data = [];
     for (var i = 0; i < values.length; i++) {
       var row = values[i];
@@ -494,9 +514,10 @@ function getProductCatalog() {
       if (!tenSanPham) continue;
       data.push({
         tenSanPham: tenSanPham,
-        donVi: String(row[1] || "").trim(),
-        donGiaBan: parseMoneyNumber_(row[2]),
-        giaVon: parseMoneyNumber_(row[3]),
+        nhomHang: String(row[1] || "").trim(),
+        donVi: String(row[2] || "").trim(),
+        donGiaBan: parseMoneyNumber_(row[3]),
+        giaVon: parseMoneyNumber_(row[4]),
       });
     }
 
@@ -506,13 +527,69 @@ function getProductCatalog() {
   }
 }
 
+function normalizeBankKey_(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function getBankConfig() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("BANK");
+    if (!sheet) throw new Error("Không tìm thấy sheet BANK");
+
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 1) throw new Error("Sheet BANK trống");
+
+    var values = sheet.getRange(1, 1, lastRow, 2).getDisplayValues();
+    var bankCode = "";
+    var accountNumber = "";
+    var accountName = "";
+
+    for (var i = 0; i < values.length; i++) {
+      var key = normalizeBankKey_(values[i][0]);
+      var val = String(values[i][1] || "").trim();
+      if (!key || !val) continue;
+
+      if (!bankCode && (key === "nganhang" || key === "bank" || key === "bankcode" || key === "manganhang")) {
+        bankCode = val;
+      }
+      if (!accountNumber && (key === "stk" || key === "sotaikhoan" || key === "accountnumber" || key === "sotk")) {
+        accountNumber = val;
+      }
+      if (!accountName && (key === "tenchutk" || key === "chutk" || key === "tentaikhoan" || key === "accountname" || key === "tenchutaikhoan")) {
+        accountName = val;
+      }
+    }
+
+    if (!bankCode || !accountNumber) {
+      throw new Error("Thiếu thông tin ngân hàng hoặc số tài khoản trong sheet BANK");
+    }
+
+    return {
+      success: true,
+      data: {
+        bankCode: bankCode,
+        accountNumber: accountNumber,
+        accountName: accountName,
+      },
+    };
+  } catch (e) {
+    return { success: false, message: "Lỗi: " + e.message, data: null };
+  }
+}
+
 function findProductRowByKey_(sheet, dataStartRow, tenSanPham, donVi) {
   var lastDataRow = getLastDataRowByCol_(sheet, 2, dataStartRow);
   if (lastDataRow < dataStartRow) return 0;
   var key = buildProductKey_(tenSanPham, donVi);
-  var values = sheet.getRange(dataStartRow, 2, lastDataRow - dataStartRow + 1, 2).getDisplayValues();
+  var values = sheet.getRange(dataStartRow, 2, lastDataRow - dataStartRow + 1, 3).getDisplayValues();
   for (var i = 0; i < values.length; i++) {
-    if (buildProductKey_(values[i][0], values[i][1]) === key) {
+    if (buildProductKey_(values[i][0], values[i][2]) === key) {
       return dataStartRow + i;
     }
   }
@@ -520,11 +597,18 @@ function findProductRowByKey_(sheet, dataStartRow, tenSanPham, donVi) {
 }
 
 function updateProductCatalogItem(payload) {
+  return runWithLockOrQueue_("UPDATE_PRODUCT", { payload: payload }, function() {
+    return updateProductCatalogItemInternal_(payload);
+  });
+}
+
+function updateProductCatalogItemInternal_(payload) {
   try {
     var p = payload || {};
     var originalTenSanPham = String(p.originalTenSanPham || "").trim();
     var originalDonVi = String(p.originalDonVi || "").trim();
     var tenSanPham = String(p.tenSanPham || "").trim();
+    var nhomHang = String(p.nhomHang || "").trim();
     var donVi = String(p.donVi || "").trim();
     var donGiaBan = Math.max(parseMoneyNumber_(p.donGiaBan), 0);
     var giaVon = Math.max(parseMoneyNumber_(p.giaVon), 0);
@@ -554,7 +638,7 @@ function updateProductCatalogItem(payload) {
       }
     }
 
-    sheet.getRange(targetRow, 2, 1, 4).setValues([[tenSanPham, donVi, donGiaBan, giaVon]]);
+    sheet.getRange(targetRow, 2, 1, 5).setValues([[tenSanPham, nhomHang, donVi, donGiaBan, giaVon]]);
     if (targetRow !== sourceRow) {
       sheet.deleteRow(sourceRow);
       if (targetRow > sourceRow) targetRow = targetRow - 1;
@@ -567,9 +651,16 @@ function updateProductCatalogItem(payload) {
 }
 
 function createProductCatalogItem(payload) {
+  return runWithLockOrQueue_("CREATE_PRODUCT", { payload: payload }, function() {
+    return createProductCatalogItemInternal_(payload);
+  });
+}
+
+function createProductCatalogItemInternal_(payload) {
   try {
     var p = payload || {};
     var tenSanPham = String(p.tenSanPham || "").trim();
+    var nhomHang = String(p.nhomHang || "").trim();
     var donVi = String(p.donVi || "").trim();
     var donGiaBan = Math.max(parseMoneyNumber_(p.donGiaBan), 0);
     var giaVon = Math.max(parseMoneyNumber_(p.giaVon), 0);
@@ -594,16 +685,17 @@ function createProductCatalogItem(payload) {
 
     var templateRow = appendStartRow - 1;
     if (templateRow >= dataStartRow) {
+      var templateCols = Math.max(6, sheet.getLastColumn());
       sheet
-        .getRange(templateRow, 1, 1, 6)
+        .getRange(templateRow, 1, 1, templateCols)
         .copyTo(
-          sheet.getRange(appendStartRow, 1, 1, 6),
+          sheet.getRange(appendStartRow, 1, 1, templateCols),
           SpreadsheetApp.CopyPasteType.PASTE_FORMAT,
           false,
         );
     }
 
-    sheet.getRange(appendStartRow, 2, 1, 5).setValues([[tenSanPham, donVi, donGiaBan, giaVon, ""]]);
+    sheet.getRange(appendStartRow, 2, 1, 5).setValues([[tenSanPham, nhomHang, donVi, donGiaBan, giaVon]]);
     updateSTT_(sheet, dataStartRow);
     return { success: true, message: "Đã thêm sản phẩm thành công" };
   } catch (e) {
@@ -612,6 +704,12 @@ function createProductCatalogItem(payload) {
 }
 
 function deleteProductCatalogItem(payload) {
+  return runWithLockOrQueue_("DELETE_PRODUCT", { payload: payload }, function() {
+    return deleteProductCatalogItemInternal_(payload);
+  });
+}
+
+function deleteProductCatalogItemInternal_(payload) {
   try {
     var p = payload || {};
     var tenSanPham = String(p.tenSanPham || "").trim();
@@ -724,6 +822,12 @@ function findCustomerRowByOrderCode_(sheetKH, maPhieu) {
 }
 
 function updateDebtCustomer(payload) {
+  return runWithLockOrQueue_("UPDATE_DEBT", { payload: payload }, function() {
+    return updateDebtCustomerInternal_(payload);
+  });
+}
+
+function updateDebtCustomerInternal_(payload) {
   try {
     var input = payload || {};
     var maPhieuOriginal = String(input.maPhieuOriginal || input.maPhieu || "").trim();
@@ -777,6 +881,12 @@ function updateDebtCustomer(payload) {
 }
 
 function settleAllDebtCustomers() {
+  return runWithLockOrQueue_("SETTLE_DEBT", {}, function() {
+    return settleAllDebtCustomersInternal_();
+  });
+}
+
+function settleAllDebtCustomersInternal_() {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheetKH = ss.getSheetByName("KHACH");
@@ -945,6 +1055,186 @@ function getOrderHistory() {
   }
 }
 
+function escapeHtml_(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatDisplayDate_(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return "-";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw.slice(8, 10) + "/" + raw.slice(5, 7) + "/" + raw.slice(0, 4);
+  }
+  return raw;
+}
+
+function buildReceiptPdfHtml_(order) {
+  var totalFromItems = (order.products || []).reduce(function(sum, p) {
+    return sum + (p.soLuong || 0) * (p.donGiaBan || 0);
+  }, 0);
+  var total = order.tongHoaDon || totalFromItems;
+  var tienNo = Math.max(Number(order.tienNo || 0), 0);
+  var daTra = Math.max(total - tienNo, 0);
+  var createdAt = formatDisplayDate_(order.ngayBan);
+  var customerName = order.tenKhach || "Khách ghé thăm";
+  var phone = order.soDienThoai || "";
+  var note = order.ghiChu || "-";
+  var statusText = order.trangThai || "Đã thanh toán";
+
+  var rows = (order.products || []).map(function(p) {
+    var thanhTien = (p.soLuong || 0) * (p.donGiaBan || 0);
+    return (
+      "<tr>" +
+      "<td>" + escapeHtml_(p.tenSanPham || "") + "</td>" +
+      "<td>" + escapeHtml_(p.donVi || "-") + "</td>" +
+      "<td style=\"text-align:right;\">" + formatMoneyNumber_(p.soLuong || 0) + "</td>" +
+      "<td style=\"text-align:right;\">" + formatMoneyNumber_(p.donGiaBan || 0) + "</td>" +
+      "<td style=\"text-align:right; font-weight:700; color:#be123c;\">" + formatMoneyNumber_(thanhTien) + "</td>" +
+      "</tr>"
+    );
+  }).join("");
+
+  if (!rows) rows = "<tr><td colspan=\"5\" style=\"text-align:center; color:#64748b; padding:16px;\">Không có sản phẩm</td></tr>";
+
+  return (
+    "<!doctype html>" +
+    "<html lang=\"vi\">" +
+    "<head><meta charset=\"utf-8\" />" +
+    "<style>" +
+    "@page { size: A4; margin: 18mm; }" +
+    "body { font-family: Arial, sans-serif; color:#0f172a; }" +
+    ".sheet { background:#ffffff; }" +
+    ".header { border:1px solid #fecdd3; background: linear-gradient(90deg,#fff1f2, #ffffff); padding:16px; border-radius:14px; }" +
+    ".brand { font-weight:800; font-size:22px; color:#be123c; letter-spacing:1px; }" +
+    ".muted { color:#64748b; font-size:12px; }" +
+    ".box { border:1px solid #e2e8f0; border-radius:12px; padding:14px; }" +
+    "table { width:100%; border-collapse: collapse; margin-top:16px; }" +
+    "thead th { background:#ffe4e6; color:#be123c; text-transform:uppercase; font-size:11px; letter-spacing:.5px; padding:10px; text-align:left; border-bottom:1px solid #fecdd3; }" +
+    "tbody td { border-top:1px solid #f1f5f9; padding:10px; font-size:12px; }" +
+    ".summary { border:1px solid #fecdd3; background:#fff1f2; padding:12px; border-radius:12px; width:280px; }" +
+    ".summary .row { display:flex; justify-content:space-between; font-size:12px; margin-top:6px; }" +
+    ".summary .total { font-weight:800; color:#be123c; }" +
+    ".footer { margin-top:24px; font-size:11px; color:#94a3b8; display:flex; justify-content:space-between; }" +
+    "</style></head><body>" +
+    "<div class=\"sheet\">" +
+    "<div class=\"header\">" +
+    "<div style=\"display:flex; justify-content:space-between; align-items:flex-start;\">" +
+    "<div>" +
+    "<div class=\"brand\">DULIA</div>" +
+    "<div class=\"muted\">Hóa đơn bán lẻ chuyên nghiệp</div>" +
+    "</div>" +
+    "<div style=\"text-align:right;\">" +
+    "<div class=\"muted\" style=\"text-transform:uppercase; letter-spacing:.6px; color:#f43f5e;\">Mã phiếu</div>" +
+    "<div style=\"font-size:22px; font-weight:800;\">" + escapeHtml_(order.maPhieu || "") + "</div>" +
+    "<div class=\"muted\">Ngày bán: " + escapeHtml_(createdAt) + "</div>" +
+    "</div>" +
+    "</div></div>" +
+    "<div style=\"display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;\">" +
+    "<div class=\"box\">" +
+    "<div class=\"muted\" style=\"text-transform:uppercase; font-weight:700; color:#be123c;\">Thông tin khách hàng</div>" +
+    "<div style=\"margin-top:8px; font-size:13px;\">" +
+    "<div style=\"display:flex; justify-content:space-between;\"><span class=\"muted\">Tên</span><strong>" + escapeHtml_(customerName) + "</strong></div>" +
+    (phone ? "<div style=\"display:flex; justify-content:space-between; margin-top:6px;\"><span class=\"muted\">SĐT</span><strong>" + escapeHtml_(phone) + "</strong></div>" : "") +
+    "<div style=\"display:flex; justify-content:space-between; margin-top:6px;\"><span class=\"muted\">Trạng thái</span><strong>" + escapeHtml_(statusText) + "</strong></div>" +
+    "</div></div>" +
+    "<div class=\"box\">" +
+    "<div class=\"muted\" style=\"text-transform:uppercase; font-weight:700; color:#be123c;\">Ghi chú đơn hàng</div>" +
+    "<div style=\"margin-top:8px; font-size:13px; min-height:70px;\">" + escapeHtml_(note) + "</div>" +
+    "</div></div>" +
+    "<table><colgroup>" +
+    "<col style=\"width:40%\" />" +
+    "<col style=\"width:14%\" />" +
+    "<col style=\"width:10%\" />" +
+    "<col style=\"width:18%\" />" +
+    "<col style=\"width:18%\" />" +
+    "</colgroup><thead><tr>" +
+    "<th>Sản phẩm</th><th>Đơn vị</th><th style=\"text-align:right;\">SL</th><th style=\"text-align:right;\">Đơn giá</th><th style=\"text-align:right;\">Thành tiền</th>" +
+    "</tr></thead><tbody>" + rows + "</tbody></table>" +
+    "<div style=\"display:flex; justify-content:flex-end; margin-top:16px;\">" +
+    "<div class=\"summary\">" +
+    "<div class=\"row\"><span class=\"muted\">Tổng cộng</span><span class=\"total\">" + formatMoneyNumber_(total) + "</span></div>" +
+    "<div class=\"row\"><span class=\"muted\">Đã trả</span><strong>" + formatMoneyNumber_(daTra) + "</strong></div>" +
+    (tienNo > 0 ? "<div class=\"row\"><span class=\"muted\">Còn nợ</span><strong>" + formatMoneyNumber_(tienNo) + "</strong></div>" : "") +
+    "</div></div>" +
+    "<div class=\"footer\"><div>Hóa đơn được tạo bởi <strong style=\"color:#be123c;\">DULIA</strong></div><div>In từ hệ thống bán hàng</div></div>" +
+    "</div></body></html>"
+  );
+}
+
+function buildReceiptPdf_(maPhieu) {
+  if (!maPhieu) {
+    return HtmlService.createHtmlOutput("Thiếu mã phiếu để in.");
+  }
+  var res = getOrderHistory();
+  if (!res || !res.success) {
+    return HtmlService.createHtmlOutput("Không tải được dữ liệu hóa đơn.");
+  }
+  var order = null;
+  for (var i = 0; i < res.data.length; i++) {
+    if (String(res.data[i].maPhieu || "").trim() === maPhieu) {
+      order = res.data[i];
+      break;
+    }
+  }
+  if (!order) {
+    return HtmlService.createHtmlOutput("Không tìm thấy hóa đơn cần in.");
+  }
+  var html = buildReceiptPdfHtml_(order);
+  var blob = HtmlService.createHtmlOutput(html).getAs("application/pdf");
+  blob.setName("Hoa-don-" + maPhieu + ".pdf");
+  return blob;
+}
+
+function getOrderByMaPhieu_(maPhieu) {
+  var res = getOrderHistory();
+  if (!res || !res.success || !res.data) return null;
+  for (var i = 0; i < res.data.length; i++) {
+    if (String(res.data[i].maPhieu || "").trim() === maPhieu) {
+      return res.data[i];
+    }
+  }
+  return null;
+}
+
+function ensureReceiptFolder_() {
+  var name = "DULIA_HOA_DON_PDF";
+  var folders = DriveApp.getFoldersByName(name);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(name);
+}
+
+function createReceiptPdf(maPhieu) {
+  try {
+    var key = String(maPhieu || "").trim();
+    if (!key) return { success: false, message: "Thiếu mã phiếu." };
+    var order = getOrderByMaPhieu_(key);
+    if (!order) return { success: false, message: "Không tìm thấy hóa đơn." };
+    var html = buildReceiptPdfHtml_(order);
+    var blob = HtmlService.createHtmlOutput(html).getAs("application/pdf");
+    blob.setName("Hoa-don-" + key + ".pdf");
+    var folder = ensureReceiptFolder_();
+    var file = folder.createFile(blob);
+    return {
+      success: true,
+      url: file.getUrl(),
+      downloadUrl: file.getDownloadUrl(),
+      name: file.getName(),
+    };
+  } catch (e) {
+    return { success: false, message: "Lỗi: " + e.message };
+  }
+}
+
+function authorizeDrive() {
+  ensureReceiptFolder_();
+  return { success: true, message: "Drive permission granted." };
+}
+
 function getEffectiveOrderRows_(sheet, dataStartRow) {
   var lastRow = sheet.getLastRow();
   if (lastRow < dataStartRow) return [];
@@ -1038,6 +1328,12 @@ function deleteCustomerRowsByOrderCode_(sheetKH, maPhieu) {
 }
 
 function deleteOrder(maPhieu) {
+  return runWithLockOrQueue_("DELETE_ORDER", { maPhieu: maPhieu }, function() {
+    return deleteOrderInternal_(maPhieu);
+  });
+}
+
+function deleteOrderInternal_(maPhieu) {
   try {
     var key = String(maPhieu || "").trim();
     if (!key) throw new Error("Thiếu mã phiếu");
@@ -1059,6 +1355,12 @@ function deleteOrder(maPhieu) {
 }
 
 function updateOrder(payload) {
+  return runWithLockOrQueue_("UPDATE_ORDER", { payload: payload }, function() {
+    return updateOrderInternal_(payload);
+  });
+}
+
+function updateOrderInternal_(payload) {
   try {
     var maPhieuOriginal = String((payload && payload.maPhieuOriginal) || "").trim();
     if (!maPhieuOriginal) throw new Error("Thiếu mã phiếu gốc");
@@ -1129,6 +1431,10 @@ function normalizeOrderStatus_(status) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
+  if (raw.indexOf("da thanh toan qr") !== -1 || raw.indexOf("đã thanh toán qr") !== -1)
+    return "Đã thanh toán QR";
+  if (raw.indexOf("tra một phan qr") !== -1 || raw.indexOf("trả một phần qr") !== -1 || raw.indexOf("tra mot phan qr") !== -1)
+    return "Trả một phần QR";
   if (raw === "tra một phan" || raw === "trả một phần") return "Trả một phần";
   if (raw === "tra một phần" || raw === "trả một phần") return "Trả một phần";
   if (raw === "tra mot phan" || raw === "trả mot phan") return "Trả một phần";
@@ -1138,9 +1444,16 @@ function normalizeOrderStatus_(status) {
 
 function normalizeOrderStatusFromInfo_(orderInfo) {
   var code = String((orderInfo && orderInfo.trangThaiCode) || "").trim().toUpperCase();
-  if (code === "PARTIAL") return "Trả một phần";
+  var label = String((orderInfo && orderInfo.trangThai) || "").trim();
+  if (code === "PAID") {
+    if (normalizeCompareText_(label).indexOf("da thanh toan qr") !== -1) return "Đã thanh toán QR";
+    return "Đã thanh toán";
+  }
+  if (code === "PARTIAL") {
+    if (normalizeCompareText_(label).indexOf("tra mot phan qr") !== -1) return "Trả một phần QR";
+    return "Trả một phần";
+  }
   if (code === "DEBT") return "Nợ";
-  if (code === "PAID") return "Đã thanh toán";
   return normalizeOrderStatus_(orderInfo && orderInfo.trangThai);
 }
 
@@ -1208,7 +1521,13 @@ function getValidationList_(rule) {
 }
 
 function buildStatusValidationRule_() {
-  var statusOptions = ["Đã thanh toán", "Trả một phần", "Nợ"];
+  var statusOptions = [
+    "Đã thanh toán",
+    "Đã thanh toán QR",
+    "Trả một phần",
+    "Trả một phần QR",
+    "Nợ",
+  ];
   return SpreadsheetApp.newDataValidation()
     .requireValueInList(statusOptions, true)
     .setAllowInvalid(false)
@@ -1285,7 +1604,150 @@ function mergeOrderSharedColumns_(sheet, startRow, rowCount) {
   }
 }
 
+function ensureQueueSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("QUEUE");
+  if (!sheet) {
+    sheet = ss.insertSheet("QUEUE");
+    sheet.getRange(1, 1, 1, 7).setValues([[
+      "createdAt",
+      "status",
+      "action",
+      "payload",
+      "result",
+      "error",
+      "updatedAt",
+    ]]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function ensureQueueTrigger_() {
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    var hasQueueTrigger = triggers.some(function(t) {
+      return t.getHandlerFunction && t.getHandlerFunction() === "processQueue";
+    });
+    if (!hasQueueTrigger) {
+      // Ensure authorization is prompted when needed.
+      ScriptApp.newTrigger("processQueue")
+        .timeBased()
+        .everyMinutes(1)
+        .create();
+    }
+    return true;
+  } catch (e) {
+    Logger.log("WARN ensureQueueTrigger_: " + e.message);
+    return false;
+  }
+}
+
+function setupQueueInfrastructure() {
+  ensureQueueSheet_();
+  var ok = ensureQueueTrigger_();
+  return {
+    success: ok,
+    message: ok
+      ? "Queue đã sẵn sàng."
+      : "Không tạo được trigger. Hãy cấp quyền script.scriptapp và chạy lại."
+  };
+}
+
+function enqueueOperation_(action, payload) {
+  var sheet = ensureQueueSheet_();
+  var now = new Date();
+  var row = [now, "PENDING", action, JSON.stringify(payload || {}), "", "", now];
+  sheet.appendRow(row);
+  ensureQueueTrigger_();
+  return sheet.getLastRow();
+}
+
+function runWithLockOrQueue_(action, payload, fn) {
+  var lock = LockService.getDocumentLock();
+  var locked = false;
+  try {
+    lock.waitLock(5000);
+    locked = true;
+  } catch (e) {
+    var jobId = enqueueOperation_(action, payload);
+    return {
+      success: true,
+      queued: true,
+      jobId: jobId,
+      message: "Hệ thống đang bận, yêu cầu đã được đưa vào hàng đợi."
+    };
+  }
+  try {
+    return fn();
+  } finally {
+    if (locked) lock.releaseLock();
+  }
+}
+
+function processQueue() {
+  var lock = LockService.getDocumentLock();
+  lock.waitLock(30000);
+  try {
+    var sheet = ensureQueueSheet_();
+    var data = sheet.getDataRange().getValues();
+    if (data.length <= 1) return { success: true, processed: 0 };
+    var header = data[0];
+    var idxStatus = 1;
+    var idxAction = 2;
+    var idxPayload = 3;
+    var idxResult = 4;
+    var idxError = 5;
+    var idxUpdated = 6;
+    var processed = 0;
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      if (row[idxStatus] !== "PENDING") continue;
+      sheet.getRange(i + 1, idxStatus + 1).setValue("PROCESSING");
+      sheet.getRange(i + 1, idxUpdated + 1).setValue(new Date());
+      var action = row[idxAction];
+      var payload = {};
+      try {
+        payload = JSON.parse(row[idxPayload] || "{}");
+      } catch (e) {
+        payload = {};
+      }
+      try {
+        var result = dispatchQueueAction_(action, payload);
+        sheet.getRange(i + 1, idxStatus + 1).setValue("SUCCESS");
+        sheet.getRange(i + 1, idxResult + 1).setValue(JSON.stringify(result || {}));
+      } catch (err) {
+        sheet.getRange(i + 1, idxStatus + 1).setValue("FAILED");
+        sheet.getRange(i + 1, idxError + 1).setValue(String(err && err.message ? err.message : err));
+      }
+      sheet.getRange(i + 1, idxUpdated + 1).setValue(new Date());
+      processed++;
+    }
+    return { success: true, processed: processed };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function dispatchQueueAction_(action, payload) {
+  if (action === "CREATE_ORDER") return createOrderInternal_(payload.orderData, payload.options || {});
+  if (action === "UPDATE_ORDER") return updateOrderInternal_(payload.payload);
+  if (action === "DELETE_ORDER") return deleteOrderInternal_(payload.maPhieu);
+  if (action === "UPDATE_DEBT") return updateDebtCustomerInternal_(payload.payload);
+  if (action === "SETTLE_DEBT") return settleAllDebtCustomersInternal_();
+  if (action === "UPDATE_PRODUCT") return updateProductCatalogItemInternal_(payload.payload);
+  if (action === "CREATE_PRODUCT") return createProductCatalogItemInternal_(payload.payload);
+  if (action === "DELETE_PRODUCT") return deleteProductCatalogItemInternal_(payload.payload);
+  throw new Error("Unknown queue action: " + action);
+}
+
 function createOrder(orderData, options) {
+  return runWithLockOrQueue_("CREATE_ORDER", { orderData: orderData, options: options || {} }, function() {
+    return createOrderInternal_(orderData, options || {});
+  });
+}
+
+function createOrderInternal_(orderData, options) {
   try {
     options = options || {};
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1449,6 +1911,7 @@ const getDemoAccountsClient = () => call("getDemoAccounts");
 const getGlobalNoticeClient = () => call("getGlobalNotice");
 const getNextOrderFormDefaultsClient = () => call("getNextOrderFormDefaults");
 const getProductCatalogClient = () => call("getProductCatalog");
+const getBankConfigClient = () => call("getBankConfig");
 const updateProductCatalogItemClient = (payload) => call("updateProductCatalogItem", payload);
 const createProductCatalogItemClient = (payload) => call("createProductCatalogItem", payload);
 const deleteProductCatalogItemClient = (payload) => call("deleteProductCatalogItem", payload);
@@ -1457,6 +1920,7 @@ const getDebtCustomersClient = () => call("getDebtCustomers");
 const updateDebtCustomerClient = (payload) => call("updateDebtCustomer", payload);
 const settleAllDebtCustomersClient = () => call("settleAllDebtCustomers");
 const getOrderHistoryClient = () => call("getOrderHistory");
+const createReceiptPdfClient = (maPhieu) => call("createReceiptPdf", maPhieu);
 const updateOrderClient = (payload) => call("updateOrder", payload);
 const deleteOrderClient = (maPhieu) => call("deleteOrder", maPhieu);
 
@@ -1469,6 +1933,7 @@ export const gasAdapter = {
   getGlobalNotice: getGlobalNoticeClient,
   getNextOrderFormDefaults: getNextOrderFormDefaultsClient,
   getProductCatalog: getProductCatalogClient,
+  getBankConfig: getBankConfigClient,
   updateProductCatalogItem: updateProductCatalogItemClient,
   createProductCatalogItem: createProductCatalogItemClient,
   deleteProductCatalogItem: deleteProductCatalogItemClient,
@@ -1477,7 +1942,9 @@ export const gasAdapter = {
   updateDebtCustomer: updateDebtCustomerClient,
   settleAllDebtCustomers: settleAllDebtCustomersClient,
   getOrderHistory: getOrderHistoryClient,
+  createReceiptPdf: createReceiptPdfClient,
   createOrder: (orderData) => call("createOrder", orderData),
+  createInventoryReceipt: (payload) => call("createInventoryReceipt", payload),
   updateOrder: updateOrderClient,
   deleteOrder: deleteOrderClient,
 };

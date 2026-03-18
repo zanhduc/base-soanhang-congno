@@ -1,10 +1,13 @@
-﻿import { useState } from "react"
+import { useState } from "react"
 import LoginPage from "./pages/login"
 import DashboardPage from "./pages/dashboard"
 import CreateOrderPage from "./pages/create-order"
 import HistoryPage from "./pages/history"
+import ReceiptPage from "./pages/receipt"
 import ProductsPage from "./pages/products"
+import InventoryPage from "./pages/inventory"
 import DebtPage from "./pages/debt"
+import StatsPage from "./pages/stats"
 import FloatingMenu from "./components/FloatingMenu"
 import GlobalNoticeBanner from "./components/GlobalNoticeBanner"
 import { UserProvider, useUser } from "./context"
@@ -13,9 +16,17 @@ import { Toaster } from "react-hot-toast"
 function AppContent() {
   const { user, setUser, logout } = useUser()
   const [currentPath, setCurrentPath] = useState("create-order")
+  const searchParams = new URLSearchParams(window.location.search)
+  const isPrintView = searchParams.has("print")
+  const printCode = searchParams.get("print")
+  const printSize = searchParams.get("size")
 
   if (!user) {
     return <LoginPage onLoginSuccess={setUser} />
+  }
+
+  if (isPrintView) {
+    return <ReceiptPage code={printCode} size={printSize} />
   }
 
   if (["dev"].includes(user.role)) {
@@ -31,8 +42,12 @@ function AppContent() {
           return <HistoryPage user={user} />
         case "products":
           return <ProductsPage user={user} />
+        case "inventory":
+          return <InventoryPage user={user} />
         case "debt":
           return <DebtPage user={user} />
+        case "stats":
+          return <StatsPage user={user} />
         case "dashboard":
           return (
             <div className="p-8 text-center mt-20">

@@ -1,4 +1,4 @@
-﻿import { localAdapter } from "./adapters/localAdapter.js";
+import { localAdapter } from "./adapters/localAdapter.js";
 import { gasAdapter } from "./adapters/gasAdapter.js";
 
 const adapter = import.meta.env.DEV ? localAdapter : gasAdapter;
@@ -13,6 +13,7 @@ export const getDemoAccounts = adapter.getDemoAccounts;
 export const getGlobalNotice = adapter.getGlobalNotice;
 export const getNextOrderFormDefaults = adapter.getNextOrderFormDefaults;
 export const getProductCatalog = adapter.getProductCatalog;
+export const getBankConfig = adapter.getBankConfig;
 export const updateProductCatalogItem = adapter.updateProductCatalogItem;
 export const createProductCatalogItem = adapter.createProductCatalogItem;
 export const deleteProductCatalogItem = adapter.deleteProductCatalogItem;
@@ -21,7 +22,9 @@ export const getDebtCustomers = adapter.getDebtCustomers;
 export const updateDebtCustomer = adapter.updateDebtCustomer;
 export const settleAllDebtCustomers = adapter.settleAllDebtCustomers;
 export const getOrderHistory = adapter.getOrderHistory;
+export const createReceiptPdf = adapter.createReceiptPdf;
 export const createOrder = adapter.createOrder;
+export const createInventoryReceipt = adapter.createInventoryReceipt;
 export const updateOrder = adapter.updateOrder;
 export const deleteOrder = adapter.deleteOrder;
 

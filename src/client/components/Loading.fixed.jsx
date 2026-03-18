@@ -1,18 +1,18 @@
-/**
- * Loading Component - dùng chung cho mọi API call
+�/**
+ * Loading Component - d�ng chung cho mọi API call
  *
  * Usage:
  *   <Loading />                        - spinner nhỏ inline
- *   <Loading size="lg" />              - spinner lớn
+ *   <Loading size="lg" />              - spinner l�:n
  *   <Loading overlay />                - full-screen overlay
- *   <Loading text="Đang tải..." />     - có text
+ *   <Loading text="Đang tải..." />     - c� text
  */
 export default function Loading({ size = "md", overlay = false, text = "" }) {
   const sizes = {
     sm: "w-4 h-4 border-2",
     md: "w-6 h-6 border-2",
     lg: "w-10 h-10 border-3",
-  };
+  }
 
   const spinner = (
     <div className="flex flex-col items-center justify-center gap-2">
@@ -23,15 +23,16 @@ export default function Loading({ size = "md", overlay = false, text = "" }) {
         <span className="text-xs text-slate-500 font-medium">{text}</span>
       )}
     </div>
-  );
+  )
 
   if (overlay) {
     return (
       <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-white/60 backdrop-blur-sm">
         {spinner}
       </div>
-    );
+    )
   }
 
-  return spinner;
+  return spinner
 }
+

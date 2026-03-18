@@ -1,20 +1,21 @@
-﻿import { useEffect, useState } from "react"
+﻿import { useEffect, useState } from "react";
 import {
   createOrder,
   getCustomerCatalog,
+  getBankConfig,
   getNextOrderFormDefaults,
   getProductCatalog,
-} from "../api"
-import toast from "react-hot-toast"
+} from "../api";
+import toast from "react-hot-toast";
 
-const fmt = (n) => Number(n).toLocaleString()
+const fmt = (n) => Number(n).toLocaleString();
 const foldText = (v) =>
   String(v || "")
     .trim()
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
+    .replace(/Ä‘/g, "d");
 
 const toTitleCase = (v) =>
   String(v || "")
@@ -22,37 +23,56 @@ const toTitleCase = (v) =>
     .replace(/\s+/g, " ")
     .split(" ")
     .map((word) => {
-      if (!word) return word
-      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+      if (!word) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     })
-    .join(" ")
+    .join(" ");
 
 const getTodayInputDate = () => {
-  const now = new Date()
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
-  return local.toISOString().split("T")[0]
-}
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return local.toISOString().split("T")[0];
+};
 
-const DEFAULT_ORDER_CODE = "01"
-const ORDER_DEFAULTS_CACHE_KEY = "soanhang.orderDefaults"
+const buildVietQrUrl = ({
+  bankCode,
+  accountNumber,
+  accountName,
+  amount,
+  addInfo,
+}) => {
+  const bank = String(bankCode || "").trim();
+  const account = String(accountNumber || "").trim();
+  if (!bank || !account) return "";
+  const params = new URLSearchParams();
+  if (amount && Number(amount) > 0)
+    params.set("amount", String(Math.round(Number(amount))));
+  if (addInfo) params.set("addInfo", String(addInfo));
+  if (accountName) params.set("accountName", String(accountName));
+  const query = params.toString();
+  return `https://img.vietqr.io/image/${encodeURIComponent(bank)}-${encodeURIComponent(account)}-compact2.png${query ? `?${query}` : ""}`;
+};
+
+const DEFAULT_ORDER_CODE = "01";
+const ORDER_DEFAULTS_CACHE_KEY = "soanhang.orderDefaults";
 
 const readCachedOrderDefaults = () => {
   try {
-    const raw = sessionStorage.getItem(ORDER_DEFAULTS_CACHE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    const maPhieu = String(parsed?.maPhieu || "").trim()
-    const ngayBan = String(parsed?.ngayBan || "").trim()
-    if (!maPhieu || !ngayBan) return null
-    return { maPhieu, ngayBan }
+    const raw = sessionStorage.getItem(ORDER_DEFAULTS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const maPhieu = String(parsed?.maPhieu || "").trim();
+    const ngayBan = String(parsed?.ngayBan || "").trim();
+    if (!maPhieu || !ngayBan) return null;
+    return { maPhieu, ngayBan };
   } catch (e) {
-    return null
+    return null;
   }
-}
+};
 
 const writeCachedOrderDefaults = (defaults) => {
   try {
-    if (!defaults?.maPhieu || !defaults?.ngayBan) return
+    if (!defaults?.maPhieu || !defaults?.ngayBan) return;
     sessionStorage.setItem(
       ORDER_DEFAULTS_CACHE_KEY,
       JSON.stringify({
@@ -60,54 +80,54 @@ const writeCachedOrderDefaults = (defaults) => {
         ngayBan: String(defaults.ngayBan).trim(),
         updatedAt: Date.now(),
       }),
-    )
+    );
   } catch (e) {
     // noop
   }
-}
+};
 
 const createInitialOrderInfo = () => ({
   maPhieu: "",
   ngayBan: getTodayInputDate(),
-  trangThai: "Đã thanh toán",
+  trangThai: "ÄĂ£ thanh toĂ¡n",
   trangThaiCode: "PAID",
   soTienDaTra: 0,
   ghiChu: "",
-})
+});
 
 function CurrencyInput({ value, onChange, className }) {
-  const [display, setDisplay] = useState(value ? fmt(value) : "")
+  const [display, setDisplay] = useState(value ? fmt(value) : "");
 
   useEffect(() => {
-    setDisplay(value ? fmt(value) : "")
-  }, [value])
+    setDisplay(value ? fmt(value) : "");
+  }, [value]);
 
   const handleChange = (e) => {
-    const el = e.target
-    const cursorPos = el.selectionStart
-    const oldLen = el.value.length
+    const el = e.target;
+    const cursorPos = el.selectionStart;
+    const oldLen = el.value.length;
 
-    // Chỉ giữ số
-    const digits = e.target.value.replace(/[^0-9]/g, "")
-    const num = parseInt(digits) || 0
+    // Chá»‰ giá»¯ sá»‘
+    const digits = e.target.value.replace(/[^0-9]/g, "");
+    const num = parseInt(digits) || 0;
 
-    onChange(num)
-    const formatted = num > 0 ? fmt(num) : digits
-    setDisplay(formatted)
+    onChange(num);
+    const formatted = num > 0 ? fmt(num) : digits;
+    setDisplay(formatted);
 
     // Fix cursor position sau khi format
     requestAnimationFrame(() => {
-      const newLen = formatted.length
-      const diff = newLen - oldLen
-      const newPos = Math.max(0, cursorPos + diff)
-      el.setSelectionRange(newPos, newPos)
-    })
-  }
+      const newLen = formatted.length;
+      const diff = newLen - oldLen;
+      const newPos = Math.max(0, cursorPos + diff);
+      el.setSelectionRange(newPos, newPos);
+    });
+  };
 
   const handleBlur = () => {
-    if (!value) setDisplay("")
-    else setDisplay(fmt(value))
-  }
+    if (!value) setDisplay("");
+    else setDisplay(fmt(value));
+  };
 
   return (
     <div className="relative">
@@ -121,10 +141,12 @@ function CurrencyInput({ value, onChange, className }) {
         className={className}
       />
       {value > 0 && (
-        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium pointer-events-none">đ</span>
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium pointer-events-none">
+          Ä‘
+        </span>
       )}
     </div>
-  )
+  );
 }
 
 function CustomerInfoSection({
@@ -137,20 +159,24 @@ function CustomerInfoSection({
   onSelectCustomerSuggestion,
 }) {
   const inputCls =
-    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
+    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all";
 
   return (
     <div className="space-y-4">
       <div>
-        <label className="block text-sm font-semibold text-slate-800 mb-2">Tên khách hàng</label>
+        <label className="block text-sm font-semibold text-slate-800 mb-2">
+          TĂªn khĂ¡ch hĂ ng
+        </label>
         <div className="relative">
           <input
             type="text"
-            placeholder="Nhập tên khách hàng"
+            placeholder="Nháº­p tĂªn khĂ¡ch hĂ ng"
             value={customerInfo.tenKhach}
             onFocus={onShowSuggestions}
             onBlur={() => setTimeout(onHideSuggestions, 120)}
-            onChange={(e) => onUpdate({ ...customerInfo, tenKhach: e.target.value })}
+            onChange={(e) =>
+              onUpdate({ ...customerInfo, tenKhach: e.target.value })
+            }
             className={inputCls}
           />
           {showCustomerSuggestions && customerSuggestions.length > 0 && (
@@ -163,8 +189,12 @@ function CustomerInfoSection({
                   onMouseDown={(ev) => ev.preventDefault()}
                   onClick={() => onSelectCustomerSuggestion(c)}
                 >
-                  <p className="text-sm font-semibold text-slate-800">{c.tenKhach}</p>
-                  <p className="text-xs text-slate-500">{c.soDienThoai || "-"}</p>
+                  <p className="text-sm font-semibold text-slate-800">
+                    {c.tenKhach}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {c.soDienThoai || "-"}
+                  </p>
                 </button>
               ))}
             </div>
@@ -172,148 +202,163 @@ function CustomerInfoSection({
         </div>
       </div>
       <div>
-        <label className="block text-sm font-semibold text-slate-800 mb-2">Số điện thoại</label>
-        <input type="tel" placeholder="Nhập số điện thoại" value={customerInfo.soDienThoai}
-          onChange={(e) => onUpdate({ ...customerInfo, soDienThoai: e.target.value })} className={inputCls} />
+        <label className="block text-sm font-semibold text-slate-800 mb-2">
+          Sá»‘ Ä‘iá»‡n thoáº¡i
+        </label>
+        <input
+          type="tel"
+          placeholder="Nháº­p sá»‘ Ä‘iá»‡n thoáº¡i"
+          value={customerInfo.soDienThoai}
+          onChange={(e) =>
+            onUpdate({ ...customerInfo, soDienThoai: e.target.value })
+          }
+          className={inputCls}
+        />
       </div>
     </div>
-  )
+  );
 }
 
 function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
   const inputCls =
-    "w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
+    "w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all";
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-2 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-2 sm:gap-4">
         <div className="min-w-0">
-          <label className="block text-sm font-semibold text-slate-800 mb-2">Mã phiếu</label>
+          <label className="block text-sm font-semibold text-slate-800 mb-2">
+            MĂ£ phiáº¿u
+          </label>
           <input
             type="text"
-            placeholder={isLoadingDefaults ? "Đang tạo mã phiếu..." : "Nhập mã phiếu"}
+            placeholder={
+              isLoadingDefaults ? "Äang táº¡o mĂ£ phiáº¿u..." : "Nháº­p mĂ£ phiáº¿u"
+            }
             value={orderInfo.maPhieu}
-            onChange={(e) => onUpdate({ ...orderInfo, maPhieu: e.target.value })}
+            onChange={(e) =>
+              onUpdate({ ...orderInfo, maPhieu: e.target.value })
+            }
             className={`${inputCls} px-3 sm:px-4 text-[13px] sm:text-sm`}
             disabled={isLoadingDefaults}
           />
         </div>
         <div className="min-w-0">
-          <label className="block text-sm font-semibold text-slate-800 mb-2">Ngày bán</label>
+          <label className="block text-sm font-semibold text-slate-800 mb-2">
+            NgĂ y bĂ¡n
+          </label>
           <input
             type="date"
+            lang="en-GB"
             value={orderInfo.ngayBan}
-            onChange={(e) => onUpdate({ ...orderInfo, ngayBan: e.target.value })}
+            onChange={(e) =>
+              onUpdate({ ...orderInfo, ngayBan: e.target.value })
+            }
             className={`${inputCls} px-2 sm:px-4 text-[13px] sm:text-sm`}
             disabled={isLoadingDefaults}
           />
         </div>
       </div>
       {isLoadingDefaults && (
-        <p className="text-xs text-slate-500">Đang lấy mã phiếu và ngày bán mới...</p>
-      )}
-      
-      <div>
-        <label className="block text-sm font-semibold text-slate-800 mb-2">Trạng thái thanh toán</label>
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            { code: "PAID", label: "Đã thanh toán" },
-            { code: "PARTIAL", label: "Trả một phần" },
-            { code: "DEBT", label: "Nợ" },
-          ].map((st) => (
-             <button
-               key={st.code}
-               type="button"
-               onClick={() =>
-                 onUpdate({
-                   ...orderInfo,
-                   trangThai: st.label,
-                   trangThaiCode: st.code,
-                   soTienDaTra: st.code === "PARTIAL" ? orderInfo.soTienDaTra || 0 : 0,
-                 })
-               }
-               className={`py-2 px-1 sm:px-3 text-[11px] sm:text-xs font-semibold rounded-xl transition-all border ${
-                 (orderInfo.trangThaiCode || "PAID") === st.code
-                 ? "bg-rose-700 border-rose-700 text-white shadow-md shadow-rose-700/20" 
-                 : "bg-white border-slate-200 text-slate-600 hover:border-rose-300 hover:bg-rose-50"
-               }`}
-             >
-               {st.label}
-             </button>
-          ))}
-        </div>
-      </div>
-
-      {(orderInfo.trangThaiCode || "") === "PARTIAL" && (
-        <div>
-          <label className="block text-sm font-semibold text-slate-800 mb-2">Số tiền đã trả trước</label>
-          <CurrencyInput
-            value={orderInfo.soTienDaTra || 0}
-            onChange={(v) => onUpdate({ ...orderInfo, soTienDaTra: v })}
-            className={inputCls}
-          />
-          <p className="mt-1 text-xs text-slate-500">Không được lớn hơn tổng hóa đơn.</p>
-        </div>
+        <p className="text-xs text-slate-500">
+          Äang láº¥y mĂ£ phiáº¿u vĂ  ngĂ y bĂ¡n má»›i...
+        </p>
       )}
 
       <div>
-        <label className="block text-sm font-semibold text-slate-800 mb-2">Ghi chú đơn hàng</label>
-        <textarea placeholder="Thêm ghi chú cho đơn hàng..." value={orderInfo.ghiChu}
+        <label className="block text-sm font-semibold text-slate-800 mb-2">
+          Ghi chĂº Ä‘Æ¡n hĂ ng
+        </label>
+        <textarea
+          placeholder="ThĂªm ghi chĂº cho Ä‘Æ¡n hĂ ng..."
+          value={orderInfo.ghiChu}
           onChange={(e) => onUpdate({ ...orderInfo, ghiChu: e.target.value })}
-          className={`${inputCls} resize-none`} rows={2} />
+          className={`${inputCls} resize-none`}
+          rows={2}
+        />
       </div>
     </div>
-  )
+  );
 }
 
 function ProductListItem({ product, onUpdate, onRemove }) {
-  const thanhTien = product.soLuong * product.donGiaBan
+  const thanhTien = product.soLuong * product.donGiaBan;
+  const subText = product.nhomHang
+    ? `${product.nhomHang} â€¢ ${product.donVi || "KhĂ´ng xĂ¡c Ä‘á»‹nh"}`
+    : product.donVi || "KhĂ´ng xĂ¡c Ä‘á»‹nh";
 
   return (
     <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-4 md:p-5 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200 group">
       <div className="flex justify-between items-start mb-4">
         <div className="flex-1 min-w-0">
-          <p className="font-bold text-slate-800 text-base md:text-lg truncate">{product.tenSanPham}</p>
-          <p className="text-sm text-slate-500 mt-0.5">{product.donVi || "Không xác định"}</p>
+          <p className="font-bold text-slate-800 text-base md:text-lg truncate">
+            {product.tenSanPham}
+          </p>
+          <p className="text-sm text-slate-500 mt-0.5">{subText}</p>
         </div>
-        <button type="button" onClick={onRemove}
-          className="text-red-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-all ml-2 shrink-0 md:opacity-0 md:group-hover:opacity-100">
+        <button
+          type="button"
+          onClick={onRemove}
+          className="text-red-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-all ml-2 shrink-0 md:opacity-0 md:group-hover:opacity-100"
+        >
           x
         </button>
       </div>
       <div className="space-y-2">
         <div className="grid grid-cols-2 gap-2 md:gap-3">
           <div className="space-y-1">
-            <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Số lượng</label>
-            <input type="number" min="0" value={product.soLuong}
-              onChange={(e) => onUpdate({ soLuong: e.target.value === "" ? "" : parseInt(e.target.value) || 0 })}
+            <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+              Sá»‘ lÆ°á»£ng
+            </label>
+            <input
+              type="number"
+              min="0"
+              value={product.soLuong}
+              onChange={(e) =>
+                onUpdate({
+                  soLuong:
+                    e.target.value === "" ? "" : parseInt(e.target.value) || 0,
+                })
+              }
               onBlur={(e) => {
-                if (product.soLuong === "" || product.soLuong < 1) onUpdate({ soLuong: 1 })
+                if (product.soLuong === "" || product.soLuong < 1)
+                  onUpdate({ soLuong: 1 });
               }}
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all" />
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
+            />
           </div>
           <div className="space-y-1">
-            <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Thành tiền</label>
+            <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+              ThĂ nh tiá»n
+            </label>
             <div className="rounded-lg border border-rose-700/20 bg-gradient-to-br from-rose-50 to-rose-100/60 px-3 py-2 text-sm font-bold text-rose-700">
-            {thanhTien.toLocaleString()}
-            </div>  
+              {thanhTien.toLocaleString()}
+            </div>
           </div>
         </div>
         <div className="space-y-1">
-          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Đơn giá bán</label>
-          <CurrencyInput value={product.donGiaBan}
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+            ÄÆ¡n giĂ¡ bĂ¡n
+          </label>
+          <CurrencyInput
+            value={product.donGiaBan}
             onChange={(v) => onUpdate({ donGiaBan: v })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all" />
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
+          />
         </div>
         <div className="space-y-1">
-          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Giá vốn</label>
-          <CurrencyInput value={product.giaVon || 0}
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+            GiĂ¡ vá»‘n
+          </label>
+          <CurrencyInput
+            value={product.giaVon || 0}
             onChange={(v) => onUpdate({ giaVon: v })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all" />
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
+          />
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 function OrderSummary({ totalAmount, totalItems }) {
@@ -321,240 +366,363 @@ function OrderSummary({ totalAmount, totalItems }) {
     <div className="rounded-2xl border border-rose-700/20 bg-gradient-to-br from-rose-50/50 via-white to-rose-100/30 p-5 md:p-6 shadow-sm">
       <div className="space-y-4">
         <div className="flex justify-between items-center">
-          <span className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Tổng mặt hàng</span>
+          <span className="text-sm font-semibold text-slate-500 uppercase tracking-wider">
+            Tá»•ng máº·t hĂ ng
+          </span>
           <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-rose-700/10 text-rose-700 font-bold">
             {totalItems}
           </div>
         </div>
         <div className="h-px bg-gradient-to-r from-slate-200/0 via-slate-200/50 to-slate-200/0" />
         <div>
-          <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Tổng hóa đơn</p>
+          <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">
+            Tá»•ng hĂ³a Ä‘Æ¡n
+          </p>
           <p className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-rose-700 to-rose-500 bg-clip-text text-transparent">
             {totalAmount.toLocaleString()}
           </p>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 /*  Main Page  */
 
 export default function CreateOrderPage() {
-  const [isCustomerMode, setIsCustomerMode] = useState(false)
+  const [isCustomerMode, setIsCustomerMode] = useState(false);
   const [customerInfo, setCustomerInfo] = useState({
     tenKhach: "",
     soDienThoai: "",
-  })
+  });
 
   const [orderInfo, setOrderInfo] = useState(() => {
-    const initial = createInitialOrderInfo()
-    const cached = readCachedOrderDefaults()
-    if (!cached) return initial
+    const initial = createInitialOrderInfo();
+    const cached = readCachedOrderDefaults();
+    if (!cached) return initial;
     return {
       ...initial,
       maPhieu: cached.maPhieu,
       ngayBan: cached.ngayBan,
-    }
-  })
+    };
+  });
 
-  const [products, setProducts] = useState([])
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isLoadingOrderDefaults, setIsLoadingOrderDefaults] = useState(!readCachedOrderDefaults())
-  const [productCatalog, setProductCatalog] = useState([])
-  const [customerCatalog, setCustomerCatalog] = useState([])
-  const [showProductSuggestions, setShowProductSuggestions] = useState(false)
-  const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false)
+  const [products, setProducts] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingOrderDefaults, setIsLoadingOrderDefaults] = useState(
+    !readCachedOrderDefaults(),
+  );
+  const [productCatalog, setProductCatalog] = useState([]);
+  const [customerCatalog, setCustomerCatalog] = useState([]);
+  const [showProductSuggestions, setShowProductSuggestions] = useState(false);
+  const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState("PAID");
+  const [paymentMethod, setPaymentMethod] = useState("");
+  const [partialAmount, setPartialAmount] = useState(0);
+  const [pendingOrder, setPendingOrder] = useState(null);
+  const [bankConfig, setBankConfig] = useState(null);
+  const [bankError, setBankError] = useState("");
+  const [isLoadingBankConfig, setIsLoadingBankConfig] = useState(false);
   const [newProduct, setNewProduct] = useState({
     id: "",
     tenSanPham: "",
+    nhomHang: "",
     donVi: "",
     soLuong: 1,
     donGiaBan: 0,
     giaVon: 0,
-  })
+  });
   const loadOrderDefaults = async ({ silent = false } = {}) => {
-    const today = getTodayInputDate()
-    if (!silent) setIsLoadingOrderDefaults(true)
+    const today = getTodayInputDate();
+    if (!silent) setIsLoadingOrderDefaults(true);
     try {
-      const res = await getNextOrderFormDefaults()
-      const nextCode = String(res?.data?.maPhieu || "").trim() || DEFAULT_ORDER_CODE
+      const res = await getNextOrderFormDefaults();
+      const nextCode =
+        String(res?.data?.maPhieu || "").trim() || DEFAULT_ORDER_CODE;
       writeCachedOrderDefaults({
         maPhieu: nextCode,
         ngayBan: res?.data?.ngayBan || today,
-      })
+      });
       setOrderInfo((prev) => ({
         ...prev,
         maPhieu: nextCode,
         ngayBan: res?.data?.ngayBan || today,
-      }))
+      }));
     } catch (err) {
       setOrderInfo((prev) => ({
         ...prev,
         maPhieu: prev.maPhieu || DEFAULT_ORDER_CODE,
         ngayBan: today,
-      }))
+      }));
     } finally {
-      if (!silent) setIsLoadingOrderDefaults(false)
+      if (!silent) setIsLoadingOrderDefaults(false);
     }
-  }
+  };
 
   const loadProductCatalog = async () => {
     try {
-      const res = await getProductCatalog()
+      const res = await getProductCatalog();
       if (res?.success && Array.isArray(res.data)) {
-        setProductCatalog(res.data)
+        setProductCatalog(res.data);
       } else {
-        setProductCatalog([])
+        setProductCatalog([]);
       }
     } catch (err) {
-      setProductCatalog([])
+      setProductCatalog([]);
     }
-  }
+  };
 
   const loadCustomerCatalog = async () => {
     try {
-      const res = await getCustomerCatalog()
+      const res = await getCustomerCatalog();
       if (res?.success && Array.isArray(res.data)) {
         const cleaned = res.data.filter(
-          (c) => foldText(c?.tenKhach) && foldText(c?.tenKhach) !== "khach ghe tham",
-        )
-        setCustomerCatalog(cleaned)
+          (c) =>
+            foldText(c?.tenKhach) && foldText(c?.tenKhach) !== "khach ghe tham",
+        );
+        setCustomerCatalog(cleaned);
       } else {
-        setCustomerCatalog([])
+        setCustomerCatalog([]);
       }
     } catch (err) {
-      setCustomerCatalog([])
+      setCustomerCatalog([]);
     }
-  }
+  };
+
+  const ensureBankConfig = async () => {
+    if (bankConfig || isLoadingBankConfig) return;
+    setIsLoadingBankConfig(true);
+    setBankError("");
+    try {
+      const res = await getBankConfig();
+      if (res?.success && res.data) {
+        setBankConfig(res.data);
+      } else {
+        setBankError(res?.message || "KhĂ´ng táº£i Ä‘Æ°á»£c thĂ´ng tin ngĂ¢n hĂ ng.");
+      }
+    } catch (err) {
+      setBankError(err?.message || "KhĂ´ng táº£i Ä‘Æ°á»£c thĂ´ng tin ngĂ¢n hĂ ng.");
+    } finally {
+      setIsLoadingBankConfig(false);
+    }
+  };
+
+  const openPaymentModal = (orderPayload) => {
+    setPendingOrder(orderPayload);
+    setPaymentStatus(orderPayload?.initialStatus || "PAID");
+    setPartialAmount(orderPayload?.initialPartial || 0);
+    setPaymentMethod("");
+    setBankError("");
+    setShowPaymentModal(true);
+  };
+
+  const closePaymentModal = () => {
+    setShowPaymentModal(false);
+    setPaymentMethod("");
+    setPendingOrder(null);
+  };
 
   const getCatalogMatch = (name) => {
-    const keyword = foldText(name)
-    if (!keyword) return null
+    const keyword = foldText(name);
+    if (!keyword) return null;
     return (
       productCatalog.find((p) => foldText(p.tenSanPham) === keyword) || null
-    )
-  }
+    );
+  };
 
   const getCatalogSuggestions = (query) => {
-    const keyword = foldText(query)
-    if (!keyword) return productCatalog.slice(0, 8)
+    const keyword = foldText(query);
+    if (!keyword) return productCatalog.slice(0, 8);
     return productCatalog
       .filter((p) => foldText(p.tenSanPham).includes(keyword))
-      .slice(0, 8)
-  }
+      .slice(0, 8);
+  };
 
   const getCustomerSuggestions = (query) => {
-    const keyword = foldText(query)
-    if (!keyword) return customerCatalog.slice(0, 8)
+    const keyword = foldText(query);
+    if (!keyword) return customerCatalog.slice(0, 8);
     return customerCatalog
       .filter((c) => {
-        const byName = foldText(c.tenKhach).includes(keyword)
-        const byPhone = String(c.soDienThoai || "").includes(query.trim())
-        return byName || byPhone
+        const byName = foldText(c.tenKhach).includes(keyword);
+        const byPhone = String(c.soDienThoai || "").includes(query.trim());
+        return byName || byPhone;
       })
-      .slice(0, 8)
-  }
+      .slice(0, 8);
+  };
 
   const applyMatchedProduct = (current, tenSanPham, matched) => {
-    if (!matched) return { ...current, tenSanPham }
+    if (!matched) return { ...current, tenSanPham };
     return {
       ...current,
       tenSanPham: tenSanPham || matched.tenSanPham || "",
+      nhomHang: matched.nhomHang || "",
       donVi: matched.donVi || "",
       donGiaBan: Number(matched.donGiaBan || 0),
       giaVon: Number(matched.giaVon || 0),
-    }
-  }
+    };
+  };
 
   useEffect(() => {
-    const cached = readCachedOrderDefaults()
+    const cached = readCachedOrderDefaults();
     if (cached) {
       setOrderInfo((prev) => ({
         ...prev,
         maPhieu: cached.maPhieu,
         ngayBan: cached.ngayBan,
-      }))
-      loadOrderDefaults({ silent: true })
+      }));
+      loadOrderDefaults({ silent: true });
     } else {
-      loadOrderDefaults()
+      loadOrderDefaults();
     }
-    loadProductCatalog()
-    loadCustomerCatalog()
-  }, [])
+    loadProductCatalog();
+    loadCustomerCatalog();
+  }, []);
 
   const handleAddProduct = () => {
     const normalizedProduct = {
       ...newProduct,
       tenSanPham: toTitleCase(newProduct.tenSanPham),
+      nhomHang: toTitleCase(newProduct.nhomHang),
       donVi: toTitleCase(newProduct.donVi),
-    }
+    };
     if (normalizedProduct.tenSanPham && normalizedProduct.donGiaBan > 0) {
-      setProducts([...products, { ...normalizedProduct, id: Date.now().toString() }])
-      setNewProduct({ id: "", tenSanPham: "", donVi: "", soLuong: 1, donGiaBan: 0, giaVon: 0 })
+      setProducts([
+        ...products,
+        { ...normalizedProduct, id: Date.now().toString() },
+      ]);
+      setNewProduct({
+        id: "",
+        tenSanPham: "",
+        nhomHang: "",
+        donVi: "",
+        soLuong: 1,
+        donGiaBan: 0,
+        giaVon: 0,
+      });
     }
-  }
+  };
 
   const handleRemoveProduct = (id) => {
-    setProducts(products.filter((p) => p.id !== id))
-  }
+    setProducts(products.filter((p) => p.id !== id));
+  };
 
   const handleUpdateProduct = (id, updated) => {
-    setProducts(products.map((p) => (p.id === id ? { ...p, ...updated } : p)))
-  }
+    setProducts(products.map((p) => (p.id === id ? { ...p, ...updated } : p)));
+  };
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
-    if (isLoadingOrderDefaults) return toast.error("Đang tải mã phiếu mới, vui lòng chờ...")
-    if (products.length === 0) return toast.error("Vui lòng thêm ít nhất một mặt hàng")
-    if (isCustomerMode && !customerInfo.tenKhach) return toast.error("Vui lòng nhập tên khách hàng")
-    if ((orderInfo.trangThaiCode || "") === "PARTIAL") {
-      const paid = Number(orderInfo.soTienDaTra || 0)
-      if (paid <= 0) return toast.error("Vui lòng nhập số tiền đã trả trước")
-      if (paid > totalAmount) return toast.error("Số tiền đã trả không được lớn hơn tổng đơn")
+    e.preventDefault();
+    if (isLoadingOrderDefaults)
+      return toast.error("Äang táº£i mĂ£ phiáº¿u má»›i, vui lĂ²ng chá»...");
+    if (products.length === 0)
+      return toast.error("Vui lĂ²ng thĂªm Ă­t nháº¥t má»™t máº·t hĂ ng");
+    if (isCustomerMode && !customerInfo.tenKhach)
+      return toast.error("Vui lĂ²ng nháº­p tĂªn khĂ¡ch hĂ ng");
+    const normalizedOrderInfo = {
+      ...orderInfo,
+      soTienDaTra: 0,
+    };
+
+    const orderData = {
+      customer: isCustomerMode ? customerInfo : null,
+      orderInfo: normalizedOrderInfo,
+      products,
+    };
+
+    openPaymentModal({
+      orderData,
+      totalAmount,
+      initialStatus: "PAID",
+      initialPartial: 0,
+    });
+  };
+
+  const totalAmount = products.reduce(
+    (sum, p) => sum + p.soLuong * p.donGiaBan,
+    0,
+  );
+  const totalItems = products.reduce((sum, p) => sum + p.soLuong, 0);
+  const pendingTotal = Number(pendingOrder?.totalAmount || 0);
+  const isPartialOverpay =
+    paymentStatus === "PARTIAL" &&
+    pendingTotal > 0 &&
+    Number(partialAmount || 0) > pendingTotal;
+  const partialReady =
+    paymentStatus !== "PARTIAL" ||
+    (Number(partialAmount || 0) > 0 &&
+      Number(partialAmount || 0) <= pendingTotal);
+
+  const handleConfirmPayment = async () => {
+    if (!pendingOrder?.orderData) return;
+    const total = Number(pendingOrder.totalAmount || 0);
+
+    if (paymentStatus === "PARTIAL") {
+      const paid = Number(partialAmount || 0);
+      if (paid <= 0) return toast.error("Vui lĂ²ng nháº­p sá»‘ tiá»n Ä‘Ă£ tráº£ trÆ°á»›c");
+      if (paid > total)
+        return toast.error("Sá»‘ tiá»n Ä‘Ă£ tráº£ khĂ´ng Ä‘Æ°á»£c lá»›n hÆ¡n tá»•ng Ä‘Æ¡n");
     }
 
-    setIsSubmitting(true)
+    if (paymentStatus !== "DEBT" && !paymentMethod) {
+      return toast.error("Vui lĂ²ng chá»n phÆ°Æ¡ng thá»©c thanh toĂ¡n");
+    }
+
+    if (paymentMethod === "bank" && !bankConfig) {
+      return toast.error("ChÆ°a cĂ³ thĂ´ng tin ngĂ¢n hĂ ng Ä‘á»ƒ táº¡o QR");
+    }
+
+    setIsSubmitting(true);
     try {
-      const normalizedOrderInfo = {
-        ...orderInfo,
-        soTienDaTra: (orderInfo.trangThaiCode || "") === "PARTIAL" ? Number(orderInfo.soTienDaTra || 0) : 0,
-      }
+      const statusLabel =
+        paymentStatus === "DEBT"
+          ? "Ná»£"
+          : paymentStatus === "PARTIAL"
+            ? paymentMethod === "bank"
+              ? "Tráº£ má»™t pháº§n QR"
+              : "Tráº£ má»™t pháº§n"
+            : paymentMethod === "bank"
+              ? "ÄĂ£ thanh toĂ¡n QR"
+              : "ÄĂ£ thanh toĂ¡n";
+
+      const updatedOrderInfo = {
+        ...pendingOrder.orderData.orderInfo,
+        trangThaiCode: paymentStatus,
+        trangThai: statusLabel,
+        soTienDaTra: paymentStatus === "PARTIAL" ? Number(partialAmount || 0) : 0,
+      };
+
       const orderData = {
-        customer: isCustomerMode ? customerInfo : null,
-        orderInfo: normalizedOrderInfo,
-        products,
-      }
+        ...pendingOrder.orderData,
+        orderInfo: updatedOrderInfo,
+      };
 
-      const result = await createOrder(orderData)
+      const result = await createOrder(orderData);
 
-      if (result.success) {
-        toast.success(result.message || "Đơn hàng được tạo thành công!")
-        // Reset form
-        setProducts([])
-        setCustomerInfo({ tenKhach: "", soDienThoai: "" })
-        setOrderInfo(createInitialOrderInfo())
-        await loadOrderDefaults()
-        await loadProductCatalog()
-        await loadCustomerCatalog()
-        setIsCustomerMode(false)
+      if (result?.success) {
+        toast.success(result.message || "ÄÆ¡n hĂ ng Ä‘Æ°á»£c táº¡o thĂ nh cĂ´ng!");
+        closePaymentModal();
+        setProducts([]);
+        setCustomerInfo({ tenKhach: "", soDienThoai: "" });
+        setOrderInfo(createInitialOrderInfo());
+        await loadOrderDefaults();
+        await loadProductCatalog();
+        await loadCustomerCatalog();
+        setIsCustomerMode(false);
       } else {
-        toast.error(result.message || "Có lỗi xảy ra, vui lòng thử lại!")
+        toast.error(result?.message || "CĂ³ lá»—i xáº£y ra, vui lĂ²ng thá»­ láº¡i!");
       }
     } catch (err) {
-      console.error("Submit error:", err)
-      toast.error("Lỗi kết nối: " + err.message)
+      console.error("Submit error:", err);
+      toast.error("Lá»—i káº¿t ná»‘i: " + err.message);
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  }
-
-  const totalAmount = products.reduce((sum, p) => sum + p.soLuong * p.donGiaBan, 0)
-  const totalItems = products.reduce((sum, p) => sum + p.soLuong, 0)
+  };
 
   const inputCls =
-    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
-  const customerSuggestions = getCustomerSuggestions(customerInfo.tenKhach)
+    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all";
+  const customerSuggestions = getCustomerSuggestions(customerInfo.tenKhach);
 
   return (
     <main className="min-h-screen pb-24 bg-gradient-to-br from-slate-50 via-slate-50 to-rose-50/30">
@@ -563,200 +731,327 @@ export default function CreateOrderPage() {
         <div className="mb-8 md:mb-10 animate-[fadeUp_0.4s_ease] max-w-3xl">
           <div className="inline-flex items-center gap-2 mb-4 md:mb-6">
             <div className="w-3 h-3 rounded-full bg-rose-700" />
-            <span className="text-xs font-bold text-rose-700 uppercase tracking-widest">Soạn Đơn</span>
+            <span className="text-xs font-bold text-rose-700 uppercase tracking-widest">
+              Soáº¡n ÄÆ¡n
+            </span>
           </div>
           <div className="mb-4 md:mb-6">
-            <h1 className="text-4xl md:text-5xl font-black text-slate-900 leading-[1.15] md:leading-[1.2] pb-1 md:pb-2">Soạn Đơn</h1>
+            <h1 className="text-4xl md:text-5xl font-black text-slate-900 leading-[1.15] md:leading-[1.2] pb-1 md:pb-2">
+              Soáº¡n ÄÆ¡n
+            </h1>
             <h2 className="text-4xl md:text-5xl font-black bg-gradient-to-r from-rose-700 to-rose-500 bg-clip-text text-transparent leading-[1.15] md:leading-[1.2] pb-1">
-              Hàng
+              HĂ ng
             </h2>
           </div>
           <p className="text-sm md:text-base text-slate-500 max-w-md leading-relaxed font-medium">
-            Soạn đơn hàng nhanh chóng, thêm sản phẩm, số lượng, giá bán và gửi đơn chỉ trong vài bước.
+            Soáº¡n Ä‘Æ¡n hĂ ng nhanh chĂ³ng, thĂªm sáº£n pháº©m, sá»‘ lÆ°á»£ng, giĂ¡ bĂ¡n vĂ  gá»­i
+            Ä‘Æ¡n chá»‰ trong vĂ i bÆ°á»›c.
           </p>
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-5 md:space-y-6 xl:grid xl:grid-cols-12 xl:gap-6 xl:space-y-0">
-          <div className="xl:col-span-8 space-y-5 md:space-y-6">
-          {/* Customer Info Toggle */}
-          <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200">
-            <button type="button" onClick={() => setIsCustomerMode(!isCustomerMode)}
-              className="flex w-full items-center justify-between text-slate-800 hover:text-rose-700 transition-colors group">
-              <div className="flex items-center gap-3">
-                <div className={`w-2 h-2 rounded-full transition-colors duration-300 ${isCustomerMode ? "bg-rose-700" : "bg-slate-300"}`} />
-                <span className="font-semibold text-base md:text-lg">
-                  {isCustomerMode ? "Đã có thông tin khách hàng" : "Thông tin khách hàng (Tùy chọn)"}
+        <form
+          onSubmit={handleSubmit}
+          className="space-y-5 md:space-y-6 lg:grid lg:grid-cols-12 lg:gap-6 lg:space-y-0"
+        >
+          <div className="lg:col-span-8 space-y-5 md:space-y-6">
+            {/* Customer Info Toggle */}
+            <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200">
+              <button
+                type="button"
+                onClick={() => setIsCustomerMode(!isCustomerMode)}
+                className="flex w-full items-center justify-between text-slate-800 hover:text-rose-700 transition-colors group"
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-2 h-2 rounded-full transition-colors duration-300 ${isCustomerMode ? "bg-rose-700" : "bg-slate-300"}`}
+                  />
+                  <span className="font-semibold text-base md:text-lg">
+                    {isCustomerMode
+                      ? "ÄĂ£ cĂ³ thĂ´ng tin khĂ¡ch hĂ ng"
+                      : "ThĂ´ng tin khĂ¡ch hĂ ng (TĂ¹y chá»n)"}
+                  </span>
+                </div>
+                <span
+                  className={`text-lg transition-all ${isCustomerMode ? "rotate-180" : ""} group-hover:text-rose-700`}
+                >
+                  â–¼
                 </span>
-              </div>
-              <span className={`text-lg transition-all ${isCustomerMode ? "rotate-180" : ""} group-hover:text-rose-700`}>▼</span>
-            </button>
+              </button>
 
-            {isCustomerMode && (
-              <div className="mt-5 pt-5 border-t border-slate-200/50 animate-[fadeUp_0.3s_ease]">
-                <CustomerInfoSection
-                  customerInfo={customerInfo}
-                  onUpdate={setCustomerInfo}
-                  showCustomerSuggestions={showCustomerSuggestions}
-                  onShowSuggestions={() => setShowCustomerSuggestions(true)}
-                  onHideSuggestions={() => setShowCustomerSuggestions(false)}
-                  customerSuggestions={customerSuggestions}
-                  onSelectCustomerSuggestion={(c) => {
-                    setCustomerInfo({
-                      tenKhach: c.tenKhach || "",
-                      soDienThoai: c.soDienThoai || "",
-                    })
-                    setShowCustomerSuggestions(false)
-                  }}
-                />
+              {isCustomerMode && (
+                <div className="mt-5 pt-5 border-t border-slate-200/50 animate-[fadeUp_0.3s_ease]">
+                  <CustomerInfoSection
+                    customerInfo={customerInfo}
+                    onUpdate={setCustomerInfo}
+                    showCustomerSuggestions={showCustomerSuggestions}
+                    onShowSuggestions={() => setShowCustomerSuggestions(true)}
+                    onHideSuggestions={() => setShowCustomerSuggestions(false)}
+                    customerSuggestions={customerSuggestions}
+                    onSelectCustomerSuggestion={(c) => {
+                      setCustomerInfo({
+                        tenKhach: c.tenKhach || "",
+                        soDienThoai: c.soDienThoai || "",
+                      });
+                      setShowCustomerSuggestions(false);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Order Info */}
+            <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200">
+              <h3 className="font-bold text-base md:text-lg text-slate-800 mb-4">
+                ThĂ´ng tin Ä‘Æ¡n hĂ ng
+              </h3>
+              <OrderInfoSection
+                orderInfo={orderInfo}
+                onUpdate={setOrderInfo}
+                isLoadingDefaults={isLoadingOrderDefaults}
+              />
+            </div>
+
+            {/* Add Product Form */}
+            <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 space-y-4 md:space-y-5 shadow-sm hover:shadow-md transition-all duration-300">
+              <div>
+                <h3 className="font-bold text-base md:text-lg text-slate-800 mb-0.5">
+                  ThĂªm vĂ o Ä‘Æ¡n
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Nháº­p tĂªn hĂ ng, sá»‘ lÆ°á»£ng vĂ  giĂ¡ bĂ¡n
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-800 mb-2">
+                    TĂªn hĂ ng
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="VĂ­ dá»¥: Ă¡o phĂ´ng tráº¯ng, Quáº§n jean..."
+                      value={newProduct.tenSanPham}
+                      onFocus={() => setShowProductSuggestions(true)}
+                      onBlur={() => {
+                        const titleName = toTitleCase(newProduct.tenSanPham);
+                        if (titleName !== newProduct.tenSanPham) {
+                          setNewProduct((prev) => ({
+                            ...prev,
+                            tenSanPham: titleName,
+                          }));
+                        }
+                        setTimeout(() => setShowProductSuggestions(false), 120);
+                        const matched = getCatalogMatch(titleName);
+                        if (!matched) return;
+                        setNewProduct((prev) =>
+                          applyMatchedProduct(prev, titleName, matched),
+                        );
+                      }}
+                      onChange={(e) => {
+                        const tenSanPham = e.target.value;
+                        const matched = getCatalogMatch(tenSanPham);
+                        setNewProduct((prev) =>
+                          applyMatchedProduct(prev, tenSanPham, matched),
+                        );
+                      }}
+                      className={inputCls}
+                    />
+                    {showProductSuggestions &&
+                      getCatalogSuggestions(newProduct.tenSanPham).length >
+                        0 && (
+                        <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+                          {getCatalogSuggestions(newProduct.tenSanPham).map(
+                            (p) => (
+                              <button
+                                key={`${p.tenSanPham}-${p.donVi}`}
+                                type="button"
+                                className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-rose-50"
+                                onMouseDown={(ev) => ev.preventDefault()}
+                                onClick={() => {
+                                  setNewProduct((prev) =>
+                                    applyMatchedProduct(
+                                      prev,
+                                      p.tenSanPham || "",
+                                      p,
+                                    ),
+                                  );
+                                  setShowProductSuggestions(false);
+                                }}
+                              >
+                                <p className="text-sm font-semibold text-slate-800">
+                                  {p.tenSanPham}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                  {(p.nhomHang || "-")} â€¢ {p.donVi || "-"} â€¢ GiĂ¡ {fmt(p.donGiaBan || 0)}{" "}
+                                  â€¢ Vá»‘n {fmt(p.giaVon || 0)}
+                                </p>
+                              </button>
+                            ),
+                          )}
+                        </div>
+                      )}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-800 mb-2">
+                    NhĂ³m hĂ ng
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="NÆ°á»›c, BĂ¡nh káº¹o, Äá»“ Ä‘Ă³ng gĂ³i..."
+                    value={newProduct.nhomHang}
+                    onChange={(e) =>
+                      setNewProduct({ ...newProduct, nhomHang: e.target.value })
+                    }
+                    onBlur={() =>
+                      setNewProduct((prev) => ({
+                        ...prev,
+                        nhomHang: toTitleCase(prev.nhomHang),
+                      }))
+                    }
+                    className={inputCls}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3 md:gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      ÄÆ¡n vá»‹
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="cĂ¡i, bá»™, chiáº¿c..."
+                      value={newProduct.donVi}
+                      onChange={(e) =>
+                        setNewProduct({ ...newProduct, donVi: e.target.value })
+                      }
+                      onBlur={() =>
+                        setNewProduct((prev) => ({
+                          ...prev,
+                          donVi: toTitleCase(prev.donVi),
+                        }))
+                      }
+                      className={inputCls}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Sá»‘ lÆ°á»£ng
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="1"
+                      min="0"
+                      value={newProduct.soLuong}
+                      onChange={(e) =>
+                        setNewProduct({
+                          ...newProduct,
+                          soLuong:
+                            e.target.value === ""
+                              ? ""
+                              : parseInt(e.target.value) || 0,
+                        })
+                      }
+                      onBlur={() => {
+                        if (newProduct.soLuong === "" || newProduct.soLuong < 1)
+                          setNewProduct({ ...newProduct, soLuong: 1 });
+                      }}
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-800 mb-2">
+                    ÄÆ¡n giĂ¡ bĂ¡n
+                  </label>
+                  <CurrencyInput
+                    value={newProduct.donGiaBan}
+                    onChange={(v) =>
+                      setNewProduct({ ...newProduct, donGiaBan: v })
+                    }
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-800 mb-2">
+                    GiĂ¡ vá»‘n
+                  </label>
+                  <CurrencyInput
+                    value={newProduct.giaVon || 0}
+                    onChange={(v) =>
+                      setNewProduct({ ...newProduct, giaVon: v })
+                    }
+                    className={inputCls}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddProduct}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-700 to-rose-500 px-4 py-3 font-semibold text-white hover:shadow-lg hover:shadow-rose-700/25 transition-all duration-300 active:scale-95"
+                >
+                  ThĂªm vĂ o Ä‘Æ¡n
+                </button>
+              </div>
+            </div>
+
+            {/* Products Header + List */}
+            {products.length > 0 && (
+              <>
+                <div className="flex items-center justify-between lg:hidden">
+                  <div>
+                    <h2 className="text-xl md:text-2xl font-bold text-slate-800">
+                      ÄÆ¡n hĂ ng
+                    </h2>
+                    <p className="text-xs md:text-sm text-slate-500 mt-1">
+                      CĂ¡c máº·t hĂ ng trong Ä‘Æ¡n
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-xl bg-rose-700/10 text-rose-700 font-semibold">
+                    {totalItems}
+                  </div>
+                </div>
+                <div className="space-y-3 lg:hidden">
+                  {products.map((product) => (
+                    <ProductListItem
+                      key={product.id}
+                      product={product}
+                      onUpdate={(updated) =>
+                        handleUpdateProduct(product.id, updated)
+                      }
+                      onRemove={() => handleRemoveProduct(product.id)}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* Empty state */}
+            {products.length === 0 && (
+              <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-slate-50/50 to-slate-100/30 p-8 md:p-12 text-center">
+                <div className="flex justify-center mb-4">
+                  <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-rose-700/10 flex items-center justify-center text-2xl md:text-3xl">
+                    đŸ“¦
+                  </div>
+                </div>
+                <p className="text-base md:text-lg font-semibold text-slate-800 mb-1">
+                  ÄÆ¡n hĂ ng trá»‘ng
+                </p>
+                <p className="text-sm text-slate-500">
+                  ThĂªm máº·t hĂ ng vĂ o Ä‘Æ¡n Ä‘á»ƒ báº¯t Ä‘áº§u
+                </p>
               </div>
             )}
           </div>
 
-          {/* Order Info */}
-          <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200">
-            <h3 className="font-bold text-base md:text-lg text-slate-800 mb-4">Thông tin đơn hàng</h3>
-            <OrderInfoSection
-              orderInfo={orderInfo}
-              onUpdate={setOrderInfo}
-              isLoadingDefaults={isLoadingOrderDefaults}
-            />
-          </div>
-
-          {/* Add Product Form */}
-          <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 space-y-4 md:space-y-5 shadow-sm hover:shadow-md transition-all duration-300">
-            <div>
-              <h3 className="font-bold text-base md:text-lg text-slate-800 mb-0.5">Thêm vào đơn</h3>
-              <p className="text-xs text-slate-500">Nhập tên hàng, số lượng và giá bán</p>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-slate-800 mb-2">Tên hàng</label>
-                <div className="relative">
-                  <input type="text" placeholder="Ví dụ: áo phông trắng, Quần jean..."
-                    value={newProduct.tenSanPham}
-                    onFocus={() => setShowProductSuggestions(true)}
-                    onBlur={() => {
-                      const titleName = toTitleCase(newProduct.tenSanPham)
-                      if (titleName !== newProduct.tenSanPham) {
-                        setNewProduct((prev) => ({ ...prev, tenSanPham: titleName }))
-                      }
-                      setTimeout(() => setShowProductSuggestions(false), 120)
-                      const matched = getCatalogMatch(titleName)
-                      if (!matched) return
-                      setNewProduct((prev) => applyMatchedProduct(prev, titleName, matched))
-                    }}
-                    onChange={(e) => {
-                      const tenSanPham = e.target.value
-                      const matched = getCatalogMatch(tenSanPham)
-                      setNewProduct((prev) => applyMatchedProduct(prev, tenSanPham, matched))
-                    }}
-                    className={inputCls} />
-                  {showProductSuggestions && getCatalogSuggestions(newProduct.tenSanPham).length > 0 && (
-                    <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
-                      {getCatalogSuggestions(newProduct.tenSanPham).map((p) => (
-                        <button
-                          key={`${p.tenSanPham}-${p.donVi}`}
-                          type="button"
-                          className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-rose-50"
-                          onMouseDown={(ev) => ev.preventDefault()}
-                          onClick={() => {
-                            setNewProduct((prev) =>
-                              applyMatchedProduct(prev, p.tenSanPham || "", p),
-                            )
-                            setShowProductSuggestions(false)
-                          }}
-                        >
-                          <p className="text-sm font-semibold text-slate-800">{p.tenSanPham}</p>
-                          <p className="text-xs text-slate-500">{p.donVi || "-"} • Giá {fmt(p.donGiaBan || 0)} • Vốn {fmt(p.giaVon || 0)}</p>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3 md:gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-800 mb-2">Đơn vị</label>
-                  <input type="text" placeholder="cái, bộ, chiếc..."
-                    value={newProduct.donVi}
-                    onChange={(e) => setNewProduct({ ...newProduct, donVi: e.target.value })}
-                    onBlur={() => setNewProduct((prev) => ({ ...prev, donVi: toTitleCase(prev.donVi) }))}
-                    className={inputCls} />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-800 mb-2">Số lượng</label>
-                  <input type="number" placeholder="1" min="0"
-                    value={newProduct.soLuong}
-                    onChange={(e) => setNewProduct({ ...newProduct, soLuong: e.target.value === "" ? "" : parseInt(e.target.value) || 0 })}
-                    onBlur={() => {
-                      if (newProduct.soLuong === "" || newProduct.soLuong < 1) setNewProduct({ ...newProduct, soLuong: 1 })
-                    }}
-                    className={inputCls} />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-800 mb-2">Đơn giá bán</label>
-                <CurrencyInput value={newProduct.donGiaBan}
-                  onChange={(v) => setNewProduct({ ...newProduct, donGiaBan: v })}
-                  className={inputCls} />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-800 mb-2">Giá vốn</label>
-                <CurrencyInput value={newProduct.giaVon || 0}
-                  onChange={(v) => setNewProduct({ ...newProduct, giaVon: v })}
-                  className={inputCls} />
-              </div>
-              <button type="button" onClick={handleAddProduct}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-700 to-rose-500 px-4 py-3 font-semibold text-white hover:shadow-lg hover:shadow-rose-700/25 transition-all duration-300 active:scale-95">
-                Thêm vào đơn
-              </button>
-            </div>
-          </div>
-
-          {/* Products Header + List */}
-          {products.length > 0 && (
-            <>
-              <div className="flex items-center justify-between xl:hidden">
-                <div>
-                  <h2 className="text-xl md:text-2xl font-bold text-slate-800">Đơn hàng</h2>
-                  <p className="text-xs md:text-sm text-slate-500 mt-1">Các mặt hàng trong đơn</p>
-                </div>
-                <div className="flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-xl bg-rose-700/10 text-rose-700 font-semibold">
-                  {totalItems}
-                </div>
-              </div>
-              <div className="space-y-3 xl:hidden">
-                {products.map((product) => (
-                  <ProductListItem key={product.id} product={product}
-                    onUpdate={(updated) => handleUpdateProduct(product.id, updated)}
-                    onRemove={() => handleRemoveProduct(product.id)} />
-                ))}
-              </div>
-            </>
-          )}
-
-          {/* Empty state */}
-          {products.length === 0 && (
-            <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-slate-50/50 to-slate-100/30 p-8 md:p-12 text-center">
-              <div className="flex justify-center mb-4">
-                <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-rose-700/10 flex items-center justify-center text-2xl md:text-3xl">
-                  📦
-                </div>
-              </div>
-              <p className="text-base md:text-lg font-semibold text-slate-800 mb-1">Đơn hàng trống</p>
-              <p className="text-sm text-slate-500">Thêm mặt hàng vào đơn để bắt đầu</p>
-            </div>
-          )}
-          </div>
-
-          <aside className="xl:col-span-4 xl:sticky xl:top-6 self-start space-y-4">
+          <aside className="lg:col-span-4 lg:sticky lg:top-6 self-start space-y-4">
             {products.length > 0 && (
-              <div className="hidden xl:flex items-center justify-between rounded-2xl border border-slate-200/70 bg-white p-4">
+              <div className="hidden lg:flex items-center justify-between rounded-2xl border border-slate-200/70 bg-white p-4">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-800">Đơn hàng</h2>
-                  <p className="text-sm text-slate-500 mt-1">Các mặt hàng trong đơn</p>
+                  <h2 className="text-xl font-bold text-slate-800">ÄÆ¡n hĂ ng</h2>
+                  <p className="text-sm text-slate-500 mt-1">
+                    CĂ¡c máº·t hĂ ng trong Ä‘Æ¡n
+                  </p>
                 </div>
                 <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-rose-700/10 text-rose-700 font-semibold">
                   {totalItems}
@@ -764,42 +1059,246 @@ export default function CreateOrderPage() {
               </div>
             )}
             {products.length > 0 && (
-              <div className="hidden xl:block space-y-3 max-h-[48vh] overflow-y-auto pr-1">
+              <div className="hidden lg:block space-y-3 max-h-[48vh] overflow-y-auto pr-1">
                 {products.map((product) => (
-                  <ProductListItem key={`desktop-${product.id}`} product={product}
-                    onUpdate={(updated) => handleUpdateProduct(product.id, updated)}
-                    onRemove={() => handleRemoveProduct(product.id)} />
+                  <ProductListItem
+                    key={`desktop-${product.id}`}
+                    product={product}
+                    onUpdate={(updated) =>
+                      handleUpdateProduct(product.id, updated)
+                    }
+                    onRemove={() => handleRemoveProduct(product.id)}
+                  />
                 ))}
               </div>
             )}
             <OrderSummary totalAmount={totalAmount} totalItems={totalItems} />
             {products.length > 0 ? (
-              <button type="submit" disabled={isSubmitting}
+              <button
+                type="submit"
+                disabled={isSubmitting}
                 className={`w-full rounded-xl px-6 py-4 font-bold text-white text-base md:text-lg transition-all duration-300 active:scale-95 ${
                   isSubmitting
                     ? "bg-slate-400 cursor-not-allowed"
                     : "bg-gradient-to-r from-rose-700 to-rose-500 hover:shadow-lg hover:shadow-rose-700/25"
-                }`}>
+                }`}
+              >
                 {isSubmitting ? (
                   <span className="flex items-center justify-center gap-2">
                     <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Đang gửi...
+                    Äang gá»­i...
                   </span>
-                ) : "Gửi đơn hàng"}
+                ) : (
+                  "Gá»­i Ä‘Æ¡n hĂ ng"
+                )}
               </button>
             ) : (
               <div className="rounded-2xl border border-slate-200/70 bg-white p-4 text-sm text-slate-500">
-                Thêm ít nhất một sản phẩm để bật nút gửi đơn.
+                ThĂªm Ă­t nháº¥t má»™t sáº£n pháº©m Ä‘á»ƒ báº­t nĂºt gá»­i Ä‘Æ¡n.
               </div>
             )}
           </aside>
         </form>
       </div>
+      {showPaymentModal && pendingOrder && (
+        <div
+          className="fixed inset-0 z-[9900] bg-slate-900/40 p-4"
+          onClick={closePaymentModal}
+        >
+          <div
+            className="mx-auto mt-[10vh] w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  XĂ¡c nháº­n thanh toĂ¡n Ä‘Æ¡n hĂ ng
+                </h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  MĂ£ phiáº¿u: {pendingOrder?.orderData?.orderInfo?.maPhieu || "-"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closePaymentModal}
+                className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100"
+              >
+                ÄĂ³ng
+              </button>
+            </div>
+
+            <div className="mt-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                Tráº¡ng thĂ¡i thanh toĂ¡n
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { code: "PAID", label: "Thanh toĂ¡n táº¥t" },
+                  { code: "PARTIAL", label: "Tráº£ 1 pháº§n" },
+                  { code: "DEBT", label: "Ná»£" },
+                ].map((st) => (
+                  <button
+                    key={st.code}
+                    type="button"
+                    onClick={() => {
+                      setPaymentStatus(st.code);
+                      if (st.code === "DEBT") {
+                        setPaymentMethod("");
+                      }
+                    }}
+                    className={`py-2 px-1 text-[11px] font-semibold rounded-xl transition-all border ${
+                      paymentStatus === st.code
+                        ? "bg-rose-700 border-rose-700 text-white shadow-md shadow-rose-700/20"
+                        : "bg-white border-slate-200 text-slate-600 hover:border-rose-300 hover:bg-rose-50"
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {paymentStatus === "PARTIAL" && (
+              <div className="mt-4">
+                <label className="block text-sm font-semibold text-slate-800 mb-2">
+                  Sá»‘ tiá»n Ä‘Ă£ tráº£ trÆ°á»›c
+                </label>
+                <CurrencyInput
+                  value={partialAmount || 0}
+                  onChange={(v) => setPartialAmount(v)}
+                  className={`w-full rounded-xl border bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all ${
+                    isPartialOverpay
+                      ? "border-rose-400 focus:border-rose-500 focus:ring-rose-500/20"
+                      : "border-slate-200 focus:border-rose-700 focus:ring-rose-700/20"
+                  }`}
+                />
+                <p
+                  className={`mt-1 text-xs ${
+                    isPartialOverpay ? "text-rose-600" : "text-slate-500"
+                  }`}
+                >
+                  {isPartialOverpay
+                    ? "Sá»‘ tiá»n Ä‘Ă£ tráº£ khĂ´ng Ä‘Æ°á»£c lá»›n hÆ¡n tá»•ng Ä‘Æ¡n."
+                    : "KhĂ´ng Ä‘Æ°á»£c lá»›n hÆ¡n tá»•ng Ä‘Æ¡n."}
+                </p>
+              </div>
+            )}
+
+            {paymentStatus !== "DEBT" && (
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("cash")}
+                  disabled={!partialReady}
+                  className={`rounded-xl border px-4 py-2.5 text-sm font-semibold ${
+                    paymentMethod === "cash"
+                      ? "border-slate-400 bg-slate-50 text-slate-700"
+                      : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                  } ${!partialReady ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  Tiá»n máº·t
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaymentMethod("bank");
+                    ensureBankConfig();
+                  }}
+                  disabled={!partialReady}
+                  className={`rounded-xl border px-4 py-2.5 text-sm font-semibold ${
+                    paymentMethod === "bank"
+                      ? "border-rose-200 bg-rose-50 text-rose-700"
+                      : "border-rose-200 text-rose-700 hover:bg-rose-50"
+                  } ${!partialReady ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  Chuyá»ƒn khoáº£n
+                </button>
+              </div>
+            )}
+            {!partialReady && paymentStatus === "PARTIAL" && (
+              <p className="mt-2 text-xs text-slate-500">
+                Nháº­p sá»‘ tiá»n Ä‘Ă£ tráº£ trÆ°á»›c Ä‘á»ƒ chá»n phÆ°Æ¡ng thá»©c thanh toĂ¡n.
+              </p>
+            )}
+
+            {paymentStatus !== "DEBT" && paymentMethod === "bank" && (
+              <div className="mt-4 rounded-xl border border-rose-200/60 bg-rose-50/40">
+                {isLoadingBankConfig && (
+                  <p className="text-sm text-slate-500">
+                    Äang táº£i thĂ´ng tin ngĂ¢n hĂ ng...
+                  </p>
+                )}
+                {!isLoadingBankConfig && bankError && (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {bankError}
+                  </div>
+                )}
+                {!isLoadingBankConfig && !bankError && bankConfig && (
+                  <div className="space-y-3">
+                    <div className="p-1 flex items-center justify-center">
+                      {(() => {
+                        const qrUrl = buildVietQrUrl({
+                          bankCode: bankConfig.bankCode,
+                          accountNumber: bankConfig.accountNumber,
+                          accountName: bankConfig.accountName,
+                          amount:
+                            paymentStatus === "PARTIAL"
+                              ? Number(partialAmount || 0)
+                              : Number(pendingOrder.totalAmount || 0),
+                          addInfo: (() => {
+                            const maPhieu =
+                              pendingOrder?.orderData?.orderInfo?.maPhieu || "";
+                            if (paymentStatus !== "PARTIAL") return maPhieu;
+                            const total = Number(pendingOrder.totalAmount || 0);
+                            const paid = Number(partialAmount || 0);
+                            const remain = Math.max(total - paid, 0);
+                            const remainText = remain.toLocaleString("vi-VN");
+                            return `${maPhieu} cĂ²n thiáº¿u ${remainText}Ä‘`;
+                          })(),
+                        });
+                        if (!qrUrl) return null;
+                        return (
+                          <img
+                            src={qrUrl}
+                            alt="VietQR"
+                            className="h-64 w-64 rounded-2xl border border-rose-200 bg-white object-contain p-3 shadow-sm"
+                          />
+                        );
+                      })()}
+                    </div>
+                    <p className="text-center text-xs text-slate-500">
+                      QuĂ©t mĂ£ Ä‘á»ƒ chuyá»ƒn khoáº£n
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closePaymentModal}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Há»§y
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPayment}
+                disabled={isSubmitting}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold text-white transition-all ${
+                  isSubmitting
+                    ? "bg-slate-400 cursor-not-allowed"
+                    : "bg-gradient-to-r from-rose-700 to-rose-500 hover:shadow-lg hover:shadow-rose-700/25"
+                }`}
+              >
+                {paymentStatus === "DEBT" ? "XĂ¡c nháº­n ná»£" : "XĂ¡c nháº­n thanh toĂ¡n"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
-  )
+  );
 }
-
-
-
-
 

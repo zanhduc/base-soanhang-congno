@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import toast from "react-hot-toast"
-import { deleteOrder, getDebtCustomers, updateDebtCustomer } from "../api"
+import { deleteOrder, getCustomerCatalog, getDebtCustomers, updateDebtCustomer } from "../api"
 
 const fmt = (n) => Number(n || 0).toLocaleString("vi-VN")
 const toNum = (v) => Number(String(v ?? "").replace(/[^\d.-]/g, "")) || 0
@@ -96,7 +96,9 @@ function StatusSelect({ value, onChange }) {
         className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 pr-10 text-left text-sm text-slate-800 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
       >
         {current}
-        <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
+        <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}>
+          ▾
+        </span>
       </button>
       {open && (
         <div className="absolute z-30 mt-1.5 w-full rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
@@ -123,7 +125,80 @@ function StatusSelect({ value, onChange }) {
   )
 }
 
-function EditDebtModal({ row, saving, deleting, settling, onClose, onSave, onDelete, onSettle }) {
+function FilterStatusSelect({ value, onChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const options = [
+    "ALL",
+    "Đã thanh toán",
+    "Trả một phần",
+    "Nợ",
+  ]
+  const current = options.find((x) => foldText(x) === foldText(value)) || options[0]
+
+  useEffect(() => {
+    const onDocClick = (e) => {
+      if (!ref.current) return
+      if (!ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener("mousedown", onDocClick)
+    document.addEventListener("touchstart", onDocClick)
+    return () => {
+      document.removeEventListener("mousedown", onDocClick)
+      document.removeEventListener("touchstart", onDocClick)
+    }
+  }, [])
+
+  const renderLabel = (opt) => (opt === "ALL" ? "Tất cả trạng thái" : opt)
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 pr-10 text-left text-sm text-slate-800 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
+      >
+        {renderLabel(current)}
+        <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}>
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1.5 w-full rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+          {options.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => {
+                onChange(opt)
+                setOpen(false)
+              }}
+              className={`block w-full rounded-lg px-3 py-2 text-left text-sm ${
+                foldText(opt) === foldText(current)
+                  ? "bg-rose-50 text-rose-700 font-semibold"
+                  : "text-slate-700 hover:bg-rose-50"
+              }`}
+            >
+              {renderLabel(opt)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EditDebtModal({
+  row,
+  saving,
+  deleting,
+  settling,
+  onClose,
+  onSave,
+  onDelete,
+  onSettle,
+  customerCatalog,
+}) {
   const [form, setForm] = useState(() => ({
     maPhieuOriginal: row.maPhieu,
     tenKhach: row.tenKhach || "",
@@ -134,6 +209,19 @@ function EditDebtModal({ row, saving, deleting, settling, onClose, onSave, onDel
     trangThai: String(row.trangThai || "Nợ"),
     ghiChu: String(row.ghiChu || "-"),
   }))
+  const [showCustomerSuggest, setShowCustomerSuggest] = useState(false)
+
+  const getCustomerSuggestions = (query) => {
+    const q = foldText(query)
+    if (!q) return (customerCatalog || []).filter((c) => !isGuestCustomer(c.tenKhach)).slice(0, 8)
+    return (customerCatalog || [])
+      .filter(
+        (c) =>
+          !isGuestCustomer(c.tenKhach) &&
+          (foldText(c.tenKhach).includes(q) || foldText(c.soDienThoai).includes(q)),
+      )
+      .slice(0, 8)
+  }
 
   return (
     <div className="fixed inset-0 z-[9800] bg-slate-900/45 p-3 md:p-6" onClick={onClose}>
@@ -152,14 +240,42 @@ function EditDebtModal({ row, saving, deleting, settling, onClose, onSave, onDel
 
         <div className="p-4 md:p-5 space-y-3">
           <div className="grid gap-3 md:grid-cols-2">
-            <div>
+            <div className="relative">
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Tên khách hàng</label>
               <input
                 value={form.tenKhach}
-                onChange={(e) => setForm((p) => ({ ...p, tenKhach: e.target.value }))}
+                onChange={(e) => {
+                  setForm((p) => ({ ...p, tenKhach: e.target.value }))
+                  setShowCustomerSuggest(true)
+                }}
+                onFocus={() => setShowCustomerSuggest(true)}
+                onBlur={() => setTimeout(() => setShowCustomerSuggest(false), 120)}
                 placeholder="Tên khách hàng"
                 className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-1.5 text-sm text-slate-800 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
               />
+              {showCustomerSuggest && getCustomerSuggestions(form.tenKhach).length > 0 && (
+                <div className="absolute z-30 mt-1 w-full rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                  {getCustomerSuggestions(form.tenKhach).map((c) => (
+                    <button
+                      key={`${c.tenKhach}-${c.soDienThoai}`}
+                      type="button"
+                      onMouseDown={(ev) => ev.preventDefault()}
+                      onClick={() => {
+                        setForm((p) => ({
+                          ...p,
+                          tenKhach: c.tenKhach || "",
+                          soDienThoai: String(c.soDienThoai || ""),
+                        }))
+                        setShowCustomerSuggest(false)
+                      }}
+                      className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-rose-50"
+                    >
+                      <p className="text-sm font-semibold text-slate-800">{c.tenKhach}</p>
+                      <p className="text-xs text-slate-500">{c.soDienThoai || "-"}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Số điện thoại</label>
@@ -183,6 +299,7 @@ function EditDebtModal({ row, saving, deleting, settling, onClose, onSave, onDel
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Ngày bán</label>
               <input
                 type="date"
+                lang="en-GB"
                 value={form.ngayBan}
                 onChange={(e) => setForm((p) => ({ ...p, ngayBan: e.target.value }))}
                 className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 pr-10 py-1.5 text-sm text-slate-800 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
@@ -197,7 +314,11 @@ function EditDebtModal({ row, saving, deleting, settling, onClose, onSave, onDel
               <StatusSelect
                 value={form.trangThai}
                 onChange={(next) =>
-                  setForm((p) => ({ ...p, trangThai: next, tienNo: foldText(next).includes("da thanh toan") ? 0 : p.tienNo }))
+                  setForm((p) => ({
+                    ...p,
+                    trangThai: next,
+                    tienNo: foldText(next).includes("da thanh toan") ? 0 : p.tienNo,
+                  }))
                 }
               />
             </div>
@@ -261,6 +382,7 @@ export default function DebtPage() {
   const [statusFilter, setStatusFilter] = useState("ALL")
   const [editing, setEditing] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [customerCatalog, setCustomerCatalog] = useState([])
 
   const loadDebts = async () => {
     setLoading(true)
@@ -280,8 +402,22 @@ export default function DebtPage() {
     }
   }
 
+  const loadCustomerCatalog = async () => {
+    try {
+      const res = await getCustomerCatalog()
+      if (res?.success && Array.isArray(res.data)) {
+        setCustomerCatalog(res.data)
+      } else {
+        setCustomerCatalog([])
+      }
+    } catch (e) {
+      setCustomerCatalog([])
+    }
+  }
+
   useEffect(() => {
     loadDebts()
+    loadCustomerCatalog()
   }, [])
 
   const filteredRows = useMemo(() => {
@@ -434,16 +570,10 @@ export default function DebtPage() {
               placeholder="Tìm theo khách, số điện thoại, mã phiếu..."
               className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
             />
-            <select
+            <FilterStatusSelect
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-1.5 text-sm text-slate-800 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
-            >
-              <option value="ALL">Tất cả trạng thái</option>
-              <option value="Đã thanh toán">Đã thanh toán</option>
-              <option value="Trả một phần">Trả một phần</option>
-              <option value="Nợ">Nợ</option>
-            </select>
+              onChange={(next) => setStatusFilter(next)}
+            />
             <button
               type="button"
               onClick={loadDebts}
@@ -560,6 +690,7 @@ export default function DebtPage() {
           onSave={handleSave}
           onDelete={handleDeleteRequest}
           onSettle={handleQuickSettle}
+          customerCatalog={customerCatalog}
         />
       )}
 
@@ -593,7 +724,6 @@ export default function DebtPage() {
           </div>
         </div>
       )}
-
     </main>
   )
 }

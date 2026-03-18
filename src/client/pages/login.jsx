@@ -83,7 +83,7 @@ export default function LoginPage({ onLoginSuccess }) {
             alt="Dulia logo"
             className="mx-auto mt-4 mb-3 h-24 w-24 rounded-2xl object-cover"
             loading="eager"
-            fetchPriority="high"
+            fetchpriority="high"
           />
           <h1 className="text-3xl font-bold bg-gradient-to-br from-rose-700 to-rose-900 bg-clip-text text-transparent">DULI Accounting</h1>
           <p className="text-sm mt-1 text-slate-500">Hệ thống dành riêng cho bạn</p>

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 const UserContext = createContext(null)
 const USER_STORAGE_KEY = "soanhang.auth.user"
-const USER_TTL_MS = 24 * 60 * 60 * 1000
+const USER_TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
 
 const readStoredUser = () => {
   try {
@@ -28,26 +28,34 @@ export function UserProvider({ children }) {
   const setUser = useCallback((nextUser) => {
     setUserState(nextUser || null)
     if (nextUser) {
-      localStorage.setItem(
-        USER_STORAGE_KEY,
-        JSON.stringify({
-          user: nextUser,
-          expiresAt: Date.now() + USER_TTL_MS,
-        }),
-      )
+      try {
+        localStorage.setItem(
+          USER_STORAGE_KEY,
+          JSON.stringify({
+            user: nextUser,
+            expiresAt: Date.now() + USER_TTL_MS,
+          }),
+        )
+      } catch (e) {
+        // ignore storage failures (private mode, blocked storage)
+      }
     } else {
-      localStorage.removeItem(USER_STORAGE_KEY)
+      try {
+        localStorage.removeItem(USER_STORAGE_KEY)
+      } catch (e) {
+        // ignore
+      }
     }
   }, [])
 
   useEffect(() => {
     if (!user) return
-    const raw = localStorage.getItem(USER_STORAGE_KEY)
-    if (!raw) {
-      setUserState(null)
-      return
-    }
     try {
+      const raw = localStorage.getItem(USER_STORAGE_KEY)
+      if (!raw) {
+        setUserState(null)
+        return
+      }
       const parsed = JSON.parse(raw)
       const expiresAt = Number(parsed?.expiresAt || 0)
       if (!expiresAt || Date.now() >= expiresAt) {
@@ -55,14 +63,31 @@ export function UserProvider({ children }) {
         setUserState(null)
         return
       }
-      const timeoutMs = expiresAt - Date.now()
+      let timeoutMs = expiresAt - Date.now()
+      // setTimeout dung lượng tối đa là số nguyên 32 bit (khoảng 24.8 ngày ~ 2147483647 ms).
+      // Nếu timeoutMs lớn hơn con số này, setTimeout sẽ tràn ngập và thực thi ngay lập tức.
+      const MAX_TIMEOUT = 2147483647
+      if (timeoutMs > MAX_TIMEOUT) {
+        timeoutMs = MAX_TIMEOUT
+      }
+      
       const timer = setTimeout(() => {
-        localStorage.removeItem(USER_STORAGE_KEY)
-        setUserState(null)
+        if (Date.now() >= expiresAt) {
+          try {
+            localStorage.removeItem(USER_STORAGE_KEY)
+          } catch (e) {
+            // ignore
+          }
+          setUserState(null)
+        }
       }, timeoutMs)
       return () => clearTimeout(timer)
     } catch (e) {
-      localStorage.removeItem(USER_STORAGE_KEY)
+      try {
+        localStorage.removeItem(USER_STORAGE_KEY)
+      } catch (err) {
+        // ignore
+      }
       setUserState(null)
     }
   }, [user])
@@ -86,4 +111,3 @@ export function useUser() {
   }
   return ctx
 }
-

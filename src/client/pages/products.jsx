@@ -61,12 +61,30 @@ function LabeledMoneyInput({ label, tone = "rose", value, onChange, placeholder 
   )
 }
 
+function LabeledTextInput({ label, value, onChange, placeholder }) {
+  return (
+    <div className="h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-2.5 py-1.5 grid grid-cols-[auto,1fr] items-stretch gap-2 text-slate-700">
+      <span className="inline-flex self-center pt-0.5 min-w-[72px] items-center justify-start text-[11px] font-bold uppercase tracking-wide leading-none whitespace-nowrap text-slate-500">
+        {label}
+      </span>
+      <input
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className="w-full h-full py-0.5 leading-none bg-white rounded-lg border border-slate-200 px-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
+      />
+    </div>
+  )
+}
+
 const toViewRow = (p, idx) => ({
   id: `sp-${idx}-${Date.now()}`,
   isNew: false,
   originalTenSanPham: String(p.tenSanPham || ""),
+  originalNhomHang: String(p.nhomHang || ""),
   originalDonVi: String(p.donVi || ""),
   tenSanPham: String(p.tenSanPham || ""),
+  nhomHang: String(p.nhomHang || ""),
   donVi: String(p.donVi || ""),
   donGiaBan: toNum(p.donGiaBan),
   giaVon: toNum(p.giaVon),
@@ -106,7 +124,9 @@ export default function ProductsPage() {
   const filteredRows = useMemo(() => {
     const q = foldText(query)
     if (!q) return rows
-    return rows.filter((r) => foldText(`${r.tenSanPham} ${r.donVi}`).includes(q))
+    return rows.filter((r) =>
+      foldText(`${r.tenSanPham} ${r.nhomHang} ${r.donVi}`).includes(q),
+    )
   }, [rows, query])
 
   const patchRow = (id, patch) => {
@@ -120,8 +140,10 @@ export default function ProductsPage() {
         id,
         isNew: true,
         originalTenSanPham: "",
+        originalNhomHang: "",
         originalDonVi: "",
         tenSanPham: "",
+        nhomHang: "",
         donVi: "",
         donGiaBan: 0,
         giaVon: 0,
@@ -138,6 +160,7 @@ export default function ProductsPage() {
 
   const validateRow = (row) => {
     const tenSanPham = String(row.tenSanPham || "").trim()
+    const nhomHang = String(row.nhomHang || "").trim()
     const donVi = String(row.donVi || "").trim()
     const donGiaBan = Math.max(toNum(row.donGiaBan), 0)
     const giaVon = Math.max(toNum(row.giaVon), 0)
@@ -145,7 +168,7 @@ export default function ProductsPage() {
     if (!tenSanPham) return { ok: false, message: "Tên sản phẩm không được để trống" }
     if (!donVi) return { ok: false, message: "Đơn vị không được để trống" }
     if (donGiaBan <= 0) return { ok: false, message: "Đơn giá bán phải lớn hơn 0" }
-    return { ok: true, data: { tenSanPham, donVi, donGiaBan, giaVon } }
+    return { ok: true, data: { tenSanPham, nhomHang, donVi, donGiaBan, giaVon } }
   }
 
   const handleSaveRow = async (row) => {
@@ -279,7 +302,10 @@ export default function ProductsPage() {
                       <p className="text-sm md:text-base font-bold text-slate-900 truncate">
                         {row.tenSanPham || "Sản phẩm mới"}
                       </p>
-                      <p className="text-xs text-slate-500 truncate leading-tight">{row.donVi || "-"}</p>
+                      <p className="text-xs text-slate-500 truncate leading-tight">
+                        {(row.nhomHang ? `${row.nhomHang} • ` : "")}
+                        {row.donVi || "-"}
+                      </p>
                     </div>
                     <span
                       className={`inline-flex h-7 w-7 items-center justify-center rounded-full border transition-all duration-300 ease-out ${
@@ -301,34 +327,40 @@ export default function ProductsPage() {
 
                   {open && (
                     <div className="border-t border-rose-100 bg-rose-50/30 p-4 space-y-3">
-                      <div className="grid gap-2 md:gap-3 md:grid-cols-2 lg:grid-cols-4">
-                        <input
-                          value={row.tenSanPham}
-                          onChange={(e) => patchRow(row.id, { tenSanPham: e.target.value })}
-                          placeholder="Tên sản phẩm"
-                          className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
-                        />
-                        <input
-                          value={row.donVi}
-                          onChange={(e) => patchRow(row.id, { donVi: e.target.value })}
-                          placeholder="Đơn vị"
-                          className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
-                        />
-                        <LabeledMoneyInput
-                          label="Giá bán"
-                          tone="emerald"
-                          value={row.donGiaBan}
-                          onChange={(v) => patchRow(row.id, { donGiaBan: v })}
-                          placeholder="Đơn giá bán"
-                        />
-                        <LabeledMoneyInput
-                          label="Giá vốn"
-                          tone="rose"
-                          value={row.giaVon}
-                          onChange={(v) => patchRow(row.id, { giaVon: v })}
-                          placeholder="Giá vốn"
-                        />
-                      </div>
+                    <div className="grid gap-2 md:gap-3 md:grid-cols-2 lg:grid-cols-5">
+                      <LabeledTextInput
+                        label="Tên sản phẩm"
+                        value={row.tenSanPham}
+                        onChange={(e) => patchRow(row.id, { tenSanPham: e.target.value })}
+                        placeholder="Tên sản phẩm"
+                      />
+                      <LabeledTextInput
+                        label="Nhóm hàng"
+                        value={row.nhomHang}
+                        onChange={(e) => patchRow(row.id, { nhomHang: e.target.value })}
+                        placeholder="Nhóm hàng"
+                      />
+                      <LabeledTextInput
+                        label="Đơn vị"
+                        value={row.donVi}
+                        onChange={(e) => patchRow(row.id, { donVi: e.target.value })}
+                        placeholder="Đơn vị"
+                      />
+                      <LabeledMoneyInput
+                        label="Giá bán"
+                        tone="emerald"
+                        value={row.donGiaBan}
+                        onChange={(v) => patchRow(row.id, { donGiaBan: v })}
+                        placeholder="Đơn giá bán"
+                      />
+                      <LabeledMoneyInput
+                        label="Giá vốn"
+                        tone="rose"
+                        value={row.giaVon}
+                        onChange={(v) => patchRow(row.id, { giaVon: v })}
+                        placeholder="Giá vốn"
+                      />
+                    </div>
 
                       <div className="flex items-center justify-end gap-2">
                         <button
