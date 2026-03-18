@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   createOrder,
   getCustomerCatalog,
@@ -7,6 +7,7 @@ import {
   getProductCatalog,
 } from "../api";
 import toast from "react-hot-toast";
+import { buildVietQrUrl } from "../utils/vietqr";
 
 const fmt = (n) => Number(n).toLocaleString();
 const foldText = (v) =>
@@ -15,7 +16,7 @@ const foldText = (v) =>
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/Ä‘/g, "d");
+    .replace(/đ/g, "d");
 
 const toTitleCase = (v) =>
   String(v || "")
@@ -34,27 +35,10 @@ const getTodayInputDate = () => {
   return local.toISOString().split("T")[0];
 };
 
-const buildVietQrUrl = ({
-  bankCode,
-  accountNumber,
-  accountName,
-  amount,
-  addInfo,
-}) => {
-  const bank = String(bankCode || "").trim();
-  const account = String(accountNumber || "").trim();
-  if (!bank || !account) return "";
-  const params = new URLSearchParams();
-  if (amount && Number(amount) > 0)
-    params.set("amount", String(Math.round(Number(amount))));
-  if (addInfo) params.set("addInfo", String(addInfo));
-  if (accountName) params.set("accountName", String(accountName));
-  const query = params.toString();
-  return `https://img.vietqr.io/image/${encodeURIComponent(bank)}-${encodeURIComponent(account)}-compact2.png${query ? `?${query}` : ""}`;
-};
-
 const DEFAULT_ORDER_CODE = "01";
 const ORDER_DEFAULTS_CACHE_KEY = "soanhang.orderDefaults";
+const BANK_CONFIG_CACHE_KEY = "soanhang.bankConfig";
+const BANK_CONFIG_CACHE_TTL_MS = 30 * 60 * 1000;
 
 const readCachedOrderDefaults = () => {
   try {
@@ -86,10 +70,50 @@ const writeCachedOrderDefaults = (defaults) => {
   }
 };
 
+const readCachedBankConfig = () => {
+  try {
+    const raw = sessionStorage.getItem(BANK_CONFIG_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const updatedAt = Number(parsed?.updatedAt || 0);
+    if (updatedAt && Date.now() - updatedAt > BANK_CONFIG_CACHE_TTL_MS) {
+      sessionStorage.removeItem(BANK_CONFIG_CACHE_KEY);
+      return null;
+    }
+    const bankCode = String(parsed?.bankCode || "").trim();
+    const accountNumber = String(parsed?.accountNumber || "").trim();
+    const accountName = String(parsed?.accountName || "").trim();
+    if (!bankCode || !accountNumber) return null;
+    return { bankCode, accountNumber, accountName };
+  } catch (e) {
+    return null;
+  }
+};
+
+const writeCachedBankConfig = (config) => {
+  try {
+    const bankCode = String(config?.bankCode || "").trim();
+    const accountNumber = String(config?.accountNumber || "").trim();
+    const accountName = String(config?.accountName || "").trim();
+    if (!bankCode || !accountNumber) return;
+    sessionStorage.setItem(
+      BANK_CONFIG_CACHE_KEY,
+      JSON.stringify({
+        bankCode,
+        accountNumber,
+        accountName,
+        updatedAt: Date.now(),
+      }),
+    );
+  } catch (e) {
+    // noop
+  }
+};
+
 const createInitialOrderInfo = () => ({
   maPhieu: "",
   ngayBan: getTodayInputDate(),
-  trangThai: "ÄĂ£ thanh toĂ¡n",
+  trangThai: "Đã thanh toán",
   trangThaiCode: "PAID",
   soTienDaTra: 0,
   ghiChu: "",
@@ -107,7 +131,7 @@ function CurrencyInput({ value, onChange, className }) {
     const cursorPos = el.selectionStart;
     const oldLen = el.value.length;
 
-    // Chá»‰ giá»¯ sá»‘
+    // Chỉ giữ số
     const digits = e.target.value.replace(/[^0-9]/g, "");
     const num = parseInt(digits) || 0;
 
@@ -142,7 +166,7 @@ function CurrencyInput({ value, onChange, className }) {
       />
       {value > 0 && (
         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium pointer-events-none">
-          Ä‘
+          đ
         </span>
       )}
     </div>
@@ -165,12 +189,12 @@ function CustomerInfoSection({
     <div className="space-y-4">
       <div>
         <label className="block text-sm font-semibold text-slate-800 mb-2">
-          TĂªn khĂ¡ch hĂ ng
+          Tên khách hàng
         </label>
         <div className="relative">
           <input
             type="text"
-            placeholder="Nháº­p tĂªn khĂ¡ch hĂ ng"
+            placeholder="Nhập tên khách hàng"
             value={customerInfo.tenKhach}
             onFocus={onShowSuggestions}
             onBlur={() => setTimeout(onHideSuggestions, 120)}
@@ -203,11 +227,11 @@ function CustomerInfoSection({
       </div>
       <div>
         <label className="block text-sm font-semibold text-slate-800 mb-2">
-          Sá»‘ Ä‘iá»‡n thoáº¡i
+          Số điện thoại
         </label>
         <input
           type="tel"
-          placeholder="Nháº­p sá»‘ Ä‘iá»‡n thoáº¡i"
+          placeholder="Nhập số điện thoại"
           value={customerInfo.soDienThoai}
           onChange={(e) =>
             onUpdate({ ...customerInfo, soDienThoai: e.target.value })
@@ -228,12 +252,12 @@ function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
       <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-2 sm:gap-4">
         <div className="min-w-0">
           <label className="block text-sm font-semibold text-slate-800 mb-2">
-            MĂ£ phiáº¿u
+            Mã phiếu
           </label>
           <input
             type="text"
             placeholder={
-              isLoadingDefaults ? "Äang táº¡o mĂ£ phiáº¿u..." : "Nháº­p mĂ£ phiáº¿u"
+              isLoadingDefaults ? "Đang tạo mã phiếu..." : "Nhập mã phiếu"
             }
             value={orderInfo.maPhieu}
             onChange={(e) =>
@@ -245,7 +269,7 @@ function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
         </div>
         <div className="min-w-0">
           <label className="block text-sm font-semibold text-slate-800 mb-2">
-            NgĂ y bĂ¡n
+            Ngày bán
           </label>
           <input
             type="date"
@@ -261,16 +285,16 @@ function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
       </div>
       {isLoadingDefaults && (
         <p className="text-xs text-slate-500">
-          Äang láº¥y mĂ£ phiáº¿u vĂ  ngĂ y bĂ¡n má»›i...
+          Đang lấy mã phiếu và ngày bán mới...
         </p>
       )}
 
       <div>
         <label className="block text-sm font-semibold text-slate-800 mb-2">
-          Ghi chĂº Ä‘Æ¡n hĂ ng
+          Ghi chú đơn hàng
         </label>
         <textarea
-          placeholder="ThĂªm ghi chĂº cho Ä‘Æ¡n hĂ ng..."
+          placeholder="Thêm ghi chú cho đơn hàng..."
           value={orderInfo.ghiChu}
           onChange={(e) => onUpdate({ ...orderInfo, ghiChu: e.target.value })}
           className={`${inputCls} resize-none`}
@@ -284,8 +308,8 @@ function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
 function ProductListItem({ product, onUpdate, onRemove }) {
   const thanhTien = product.soLuong * product.donGiaBan;
   const subText = product.nhomHang
-    ? `${product.nhomHang} â€¢ ${product.donVi || "KhĂ´ng xĂ¡c Ä‘á»‹nh"}`
-    : product.donVi || "KhĂ´ng xĂ¡c Ä‘á»‹nh";
+    ? `${product.nhomHang} • ${product.donVi || "Không xác định"}`
+    : product.donVi || "Không xác định";
 
   return (
     <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-4 md:p-5 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200 group">
@@ -308,7 +332,7 @@ function ProductListItem({ product, onUpdate, onRemove }) {
         <div className="grid grid-cols-2 gap-2 md:gap-3">
           <div className="space-y-1">
             <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-              Sá»‘ lÆ°á»£ng
+              Số lượng
             </label>
             <input
               type="number"
@@ -329,7 +353,7 @@ function ProductListItem({ product, onUpdate, onRemove }) {
           </div>
           <div className="space-y-1">
             <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-              ThĂ nh tiá»n
+              Thành tiền
             </label>
             <div className="rounded-lg border border-rose-700/20 bg-gradient-to-br from-rose-50 to-rose-100/60 px-3 py-2 text-sm font-bold text-rose-700">
               {thanhTien.toLocaleString()}
@@ -338,7 +362,7 @@ function ProductListItem({ product, onUpdate, onRemove }) {
         </div>
         <div className="space-y-1">
           <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-            ÄÆ¡n giĂ¡ bĂ¡n
+            Đơn giá bán
           </label>
           <CurrencyInput
             value={product.donGiaBan}
@@ -348,7 +372,7 @@ function ProductListItem({ product, onUpdate, onRemove }) {
         </div>
         <div className="space-y-1">
           <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-            GiĂ¡ vá»‘n
+            Giá vốn
           </label>
           <CurrencyInput
             value={product.giaVon || 0}
@@ -367,7 +391,7 @@ function OrderSummary({ totalAmount, totalItems }) {
       <div className="space-y-4">
         <div className="flex justify-between items-center">
           <span className="text-sm font-semibold text-slate-500 uppercase tracking-wider">
-            Tá»•ng máº·t hĂ ng
+            Tổng mặt hàng
           </span>
           <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-rose-700/10 text-rose-700 font-bold">
             {totalItems}
@@ -376,7 +400,7 @@ function OrderSummary({ totalAmount, totalItems }) {
         <div className="h-px bg-gradient-to-r from-slate-200/0 via-slate-200/50 to-slate-200/0" />
         <div>
           <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">
-            Tá»•ng hĂ³a Ä‘Æ¡n
+            Tổng hóa đơn
           </p>
           <p className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-rose-700 to-rose-500 bg-clip-text text-transparent">
             {totalAmount.toLocaleString()}
@@ -490,19 +514,23 @@ export default function CreateOrderPage() {
     }
   };
 
-  const ensureBankConfig = async () => {
-    if (bankConfig || isLoadingBankConfig) return;
+  const ensureBankConfig = async ({ force = false, silent = false } = {}) => {
+    if ((bankConfig && !force) || isLoadingBankConfig) return;
     setIsLoadingBankConfig(true);
-    setBankError("");
+    if (!silent) setBankError("");
     try {
       const res = await getBankConfig();
       if (res?.success && res.data) {
         setBankConfig(res.data);
-      } else {
-        setBankError(res?.message || "KhĂ´ng táº£i Ä‘Æ°á»£c thĂ´ng tin ngĂ¢n hĂ ng.");
+        writeCachedBankConfig(res.data);
+        setBankError("");
+      } else if (!silent) {
+        setBankError(res?.message || "Không tải được thông tin ngân hàng.");
       }
     } catch (err) {
-      setBankError(err?.message || "KhĂ´ng táº£i Ä‘Æ°á»£c thĂ´ng tin ngĂ¢n hĂ ng.");
+      if (!silent) {
+        setBankError(err?.message || "Không tải được thông tin ngân hàng.");
+      }
     } finally {
       setIsLoadingBankConfig(false);
     }
@@ -577,6 +605,25 @@ export default function CreateOrderPage() {
     }
     loadProductCatalog();
     loadCustomerCatalog();
+    const cachedBank = readCachedBankConfig();
+    if (cachedBank) {
+      setBankConfig(cachedBank);
+    }
+    ensureBankConfig({ force: !!cachedBank, silent: true });
+  }, []);
+
+  const [showInventory, setShowInventory] = useState(
+    () => localStorage.getItem("enable_inventory") === "true",
+  );
+
+  useEffect(() => {
+    const handleSettingChange = (e) => setShowInventory(e.detail);
+    window.addEventListener("inventory_setting_changed", handleSettingChange);
+    return () =>
+      window.removeEventListener(
+        "inventory_setting_changed",
+        handleSettingChange,
+      );
   }, []);
 
   const handleAddProduct = () => {
@@ -614,11 +661,11 @@ export default function CreateOrderPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isLoadingOrderDefaults)
-      return toast.error("Äang táº£i mĂ£ phiáº¿u má»›i, vui lĂ²ng chá»...");
+      return toast.error("Đang tải mã phiếu mới, vui lòng chờ...");
     if (products.length === 0)
-      return toast.error("Vui lĂ²ng thĂªm Ă­t nháº¥t má»™t máº·t hĂ ng");
+      return toast.error("Vui lòng thêm ít nhất một mặt hàng");
     if (isCustomerMode && !customerInfo.tenKhach)
-      return toast.error("Vui lĂ²ng nháº­p tĂªn khĂ¡ch hĂ ng");
+      return toast.error("Vui lòng nhập tên khách hàng");
     const normalizedOrderInfo = {
       ...orderInfo,
       soTienDaTra: 0,
@@ -659,37 +706,39 @@ export default function CreateOrderPage() {
 
     if (paymentStatus === "PARTIAL") {
       const paid = Number(partialAmount || 0);
-      if (paid <= 0) return toast.error("Vui lĂ²ng nháº­p sá»‘ tiá»n Ä‘Ă£ tráº£ trÆ°á»›c");
+      if (paid <= 0) return toast.error("Vui lòng nhập số tiền đã trả trước");
       if (paid > total)
-        return toast.error("Sá»‘ tiá»n Ä‘Ă£ tráº£ khĂ´ng Ä‘Æ°á»£c lá»›n hÆ¡n tá»•ng Ä‘Æ¡n");
+        return toast.error("Số tiền đã trả không được lớn hơn tổng đơn");
     }
 
     if (paymentStatus !== "DEBT" && !paymentMethod) {
-      return toast.error("Vui lĂ²ng chá»n phÆ°Æ¡ng thá»©c thanh toĂ¡n");
+      return toast.error("Vui lòng chọn phương thức thanh toán");
     }
 
     if (paymentMethod === "bank" && !bankConfig) {
-      return toast.error("ChÆ°a cĂ³ thĂ´ng tin ngĂ¢n hĂ ng Ä‘á»ƒ táº¡o QR");
+      return toast.error("Chưa có thông tin ngân hàng để tạo QR");
     }
 
     setIsSubmitting(true);
     try {
       const statusLabel =
         paymentStatus === "DEBT"
-          ? "Ná»£"
+          ? "Nợ"
           : paymentStatus === "PARTIAL"
             ? paymentMethod === "bank"
-              ? "Tráº£ má»™t pháº§n QR"
-              : "Tráº£ má»™t pháº§n"
+              ? "Trả một phần QR"
+              : "Trả một phần"
             : paymentMethod === "bank"
-              ? "ÄĂ£ thanh toĂ¡n QR"
-              : "ÄĂ£ thanh toĂ¡n";
+              ? "Đã thanh toán QR"
+              : "Đã thanh toán";
 
       const updatedOrderInfo = {
         ...pendingOrder.orderData.orderInfo,
         trangThaiCode: paymentStatus,
         trangThai: statusLabel,
-        soTienDaTra: paymentStatus === "PARTIAL" ? Number(partialAmount || 0) : 0,
+        paymentMethod: paymentStatus === "DEBT" ? "" : paymentMethod || "",
+        soTienDaTra:
+          paymentStatus === "PARTIAL" ? Number(partialAmount || 0) : 0,
       };
 
       const orderData = {
@@ -700,7 +749,7 @@ export default function CreateOrderPage() {
       const result = await createOrder(orderData);
 
       if (result?.success) {
-        toast.success(result.message || "ÄÆ¡n hĂ ng Ä‘Æ°á»£c táº¡o thĂ nh cĂ´ng!");
+        toast.success(result.message || "Đơn hàng được tạo thành công!");
         closePaymentModal();
         setProducts([]);
         setCustomerInfo({ tenKhach: "", soDienThoai: "" });
@@ -710,11 +759,11 @@ export default function CreateOrderPage() {
         await loadCustomerCatalog();
         setIsCustomerMode(false);
       } else {
-        toast.error(result?.message || "CĂ³ lá»—i xáº£y ra, vui lĂ²ng thá»­ láº¡i!");
+        toast.error(result?.message || "Có lỗi xảy ra, vui lòng thử lại!");
       }
     } catch (err) {
       console.error("Submit error:", err);
-      toast.error("Lá»—i káº¿t ná»‘i: " + err.message);
+      toast.error("Lỗi kết nối: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -732,20 +781,20 @@ export default function CreateOrderPage() {
           <div className="inline-flex items-center gap-2 mb-4 md:mb-6">
             <div className="w-3 h-3 rounded-full bg-rose-700" />
             <span className="text-xs font-bold text-rose-700 uppercase tracking-widest">
-              Soáº¡n ÄÆ¡n
+              Soạn Đơn
             </span>
           </div>
           <div className="mb-4 md:mb-6">
             <h1 className="text-4xl md:text-5xl font-black text-slate-900 leading-[1.15] md:leading-[1.2] pb-1 md:pb-2">
-              Soáº¡n ÄÆ¡n
+              Soạn Đơn
             </h1>
             <h2 className="text-4xl md:text-5xl font-black bg-gradient-to-r from-rose-700 to-rose-500 bg-clip-text text-transparent leading-[1.15] md:leading-[1.2] pb-1">
-              HĂ ng
+              Hàng
             </h2>
           </div>
           <p className="text-sm md:text-base text-slate-500 max-w-md leading-relaxed font-medium">
-            Soáº¡n Ä‘Æ¡n hĂ ng nhanh chĂ³ng, thĂªm sáº£n pháº©m, sá»‘ lÆ°á»£ng, giĂ¡ bĂ¡n vĂ  gá»­i
-            Ä‘Æ¡n chá»‰ trong vĂ i bÆ°á»›c.
+            Soạn đơn hàng nhanh chóng, thêm sản phẩm, số lượng, giá bán và gửi
+            đơn chỉ trong vài bước.
           </p>
         </div>
 
@@ -768,14 +817,14 @@ export default function CreateOrderPage() {
                   />
                   <span className="font-semibold text-base md:text-lg">
                     {isCustomerMode
-                      ? "ÄĂ£ cĂ³ thĂ´ng tin khĂ¡ch hĂ ng"
-                      : "ThĂ´ng tin khĂ¡ch hĂ ng (TĂ¹y chá»n)"}
+                      ? "Đã có thông tin khách hàng"
+                      : "Thông tin khách hàng (Tùy chọn)"}
                   </span>
                 </div>
                 <span
                   className={`text-lg transition-all ${isCustomerMode ? "rotate-180" : ""} group-hover:text-rose-700`}
                 >
-                  â–¼
+                  ▼
                 </span>
               </button>
 
@@ -803,7 +852,7 @@ export default function CreateOrderPage() {
             {/* Order Info */}
             <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200">
               <h3 className="font-bold text-base md:text-lg text-slate-800 mb-4">
-                ThĂ´ng tin Ä‘Æ¡n hĂ ng
+                Thông tin đơn hàng
               </h3>
               <OrderInfoSection
                 orderInfo={orderInfo}
@@ -816,22 +865,22 @@ export default function CreateOrderPage() {
             <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 space-y-4 md:space-y-5 shadow-sm hover:shadow-md transition-all duration-300">
               <div>
                 <h3 className="font-bold text-base md:text-lg text-slate-800 mb-0.5">
-                  ThĂªm vĂ o Ä‘Æ¡n
+                  Thêm vào đơn
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Nháº­p tĂªn hĂ ng, sá»‘ lÆ°á»£ng vĂ  giĂ¡ bĂ¡n
+                  Nhập tên hàng, số lượng và giá bán
                 </p>
               </div>
 
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    TĂªn hĂ ng
+                    Tên hàng
                   </label>
                   <div className="relative">
                     <input
                       type="text"
-                      placeholder="VĂ­ dá»¥: Ă¡o phĂ´ng tráº¯ng, Quáº§n jean..."
+                      placeholder="Ví dụ: áo phông trắng, Quần jean..."
                       value={newProduct.tenSanPham}
                       onFocus={() => setShowProductSuggestions(true)}
                       onBlur={() => {
@@ -884,8 +933,11 @@ export default function CreateOrderPage() {
                                   {p.tenSanPham}
                                 </p>
                                 <p className="text-xs text-slate-500">
-                                  {(p.nhomHang || "-")} â€¢ {p.donVi || "-"} â€¢ GiĂ¡ {fmt(p.donGiaBan || 0)}{" "}
-                                  â€¢ Vá»‘n {fmt(p.giaVon || 0)}
+                                  {p.nhomHang || "-"} • {p.donVi || "-"} • Giá{" "}
+                                  {fmt(p.donGiaBan || 0)} • Vốn{" "}
+                                  {fmt(p.giaVon || 0)}
+                                  {showInventory &&
+                                    ` • Tồn kho: ${p.tonKho || 0}`}
                                 </p>
                               </button>
                             ),
@@ -896,11 +948,11 @@ export default function CreateOrderPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    NhĂ³m hĂ ng
+                    Nhóm hàng
                   </label>
                   <input
                     type="text"
-                    placeholder="NÆ°á»›c, BĂ¡nh káº¹o, Äá»“ Ä‘Ă³ng gĂ³i..."
+                    placeholder="Nước, Bánh kẹo, Đồ đóng gói..."
                     value={newProduct.nhomHang}
                     onChange={(e) =>
                       setNewProduct({ ...newProduct, nhomHang: e.target.value })
@@ -917,11 +969,11 @@ export default function CreateOrderPage() {
                 <div className="grid grid-cols-2 gap-3 md:gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      ÄÆ¡n vá»‹
+                      Đơn vị
                     </label>
                     <input
                       type="text"
-                      placeholder="cĂ¡i, bá»™, chiáº¿c..."
+                      placeholder="cái, bộ, chiếc..."
                       value={newProduct.donVi}
                       onChange={(e) =>
                         setNewProduct({ ...newProduct, donVi: e.target.value })
@@ -937,7 +989,7 @@ export default function CreateOrderPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      Sá»‘ lÆ°á»£ng
+                      Số lượng
                     </label>
                     <input
                       type="number"
@@ -963,7 +1015,7 @@ export default function CreateOrderPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    ÄÆ¡n giĂ¡ bĂ¡n
+                    Đơn giá bán
                   </label>
                   <CurrencyInput
                     value={newProduct.donGiaBan}
@@ -975,7 +1027,7 @@ export default function CreateOrderPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    GiĂ¡ vá»‘n
+                    Giá vốn
                   </label>
                   <CurrencyInput
                     value={newProduct.giaVon || 0}
@@ -990,7 +1042,7 @@ export default function CreateOrderPage() {
                   onClick={handleAddProduct}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-700 to-rose-500 px-4 py-3 font-semibold text-white hover:shadow-lg hover:shadow-rose-700/25 transition-all duration-300 active:scale-95"
                 >
-                  ThĂªm vĂ o Ä‘Æ¡n
+                  Thêm vào đơn
                 </button>
               </div>
             </div>
@@ -1001,10 +1053,10 @@ export default function CreateOrderPage() {
                 <div className="flex items-center justify-between lg:hidden">
                   <div>
                     <h2 className="text-xl md:text-2xl font-bold text-slate-800">
-                      ÄÆ¡n hĂ ng
+                      Đơn hàng
                     </h2>
                     <p className="text-xs md:text-sm text-slate-500 mt-1">
-                      CĂ¡c máº·t hĂ ng trong Ä‘Æ¡n
+                      Các mặt hàng trong đơn
                     </p>
                   </div>
                   <div className="flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-xl bg-rose-700/10 text-rose-700 font-semibold">
@@ -1031,14 +1083,14 @@ export default function CreateOrderPage() {
               <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-slate-50/50 to-slate-100/30 p-8 md:p-12 text-center">
                 <div className="flex justify-center mb-4">
                   <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-rose-700/10 flex items-center justify-center text-2xl md:text-3xl">
-                    đŸ“¦
+                    📦
                   </div>
                 </div>
                 <p className="text-base md:text-lg font-semibold text-slate-800 mb-1">
-                  ÄÆ¡n hĂ ng trá»‘ng
+                  Đơn hàng trống
                 </p>
                 <p className="text-sm text-slate-500">
-                  ThĂªm máº·t hĂ ng vĂ o Ä‘Æ¡n Ä‘á»ƒ báº¯t Ä‘áº§u
+                  Thêm mặt hàng vào đơn để bắt đầu
                 </p>
               </div>
             )}
@@ -1048,9 +1100,9 @@ export default function CreateOrderPage() {
             {products.length > 0 && (
               <div className="hidden lg:flex items-center justify-between rounded-2xl border border-slate-200/70 bg-white p-4">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-800">ÄÆ¡n hĂ ng</h2>
+                  <h2 className="text-xl font-bold text-slate-800">Đơn hàng</h2>
                   <p className="text-sm text-slate-500 mt-1">
-                    CĂ¡c máº·t hĂ ng trong Ä‘Æ¡n
+                    Các mặt hàng trong đơn
                   </p>
                 </div>
                 <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-rose-700/10 text-rose-700 font-semibold">
@@ -1086,15 +1138,15 @@ export default function CreateOrderPage() {
                 {isSubmitting ? (
                   <span className="flex items-center justify-center gap-2">
                     <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Äang gá»­i...
+                    Đang gửi...
                   </span>
                 ) : (
-                  "Gá»­i Ä‘Æ¡n hĂ ng"
+                  "Gửi đơn hàng"
                 )}
               </button>
             ) : (
               <div className="rounded-2xl border border-slate-200/70 bg-white p-4 text-sm text-slate-500">
-                ThĂªm Ă­t nháº¥t má»™t sáº£n pháº©m Ä‘á»ƒ báº­t nĂºt gá»­i Ä‘Æ¡n.
+                Thêm ít nhất một sản phẩm để bật nút gửi đơn.
               </div>
             )}
           </aside>
@@ -1112,10 +1164,10 @@ export default function CreateOrderPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900">
-                  XĂ¡c nháº­n thanh toĂ¡n Ä‘Æ¡n hĂ ng
+                  Xác nhận thanh toán đơn hàng
                 </h3>
                 <p className="text-sm text-slate-500 mt-1">
-                  MĂ£ phiáº¿u: {pendingOrder?.orderData?.orderInfo?.maPhieu || "-"}
+                  Mã phiếu: {pendingOrder?.orderData?.orderInfo?.maPhieu || "-"}
                 </p>
               </div>
               <button
@@ -1123,19 +1175,19 @@ export default function CreateOrderPage() {
                 onClick={closePaymentModal}
                 className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100"
               >
-                ÄĂ³ng
+                Đóng
               </button>
             </div>
 
             <div className="mt-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
-                Tráº¡ng thĂ¡i thanh toĂ¡n
+                Trạng thái thanh toán
               </p>
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { code: "PAID", label: "Thanh toĂ¡n táº¥t" },
-                  { code: "PARTIAL", label: "Tráº£ 1 pháº§n" },
-                  { code: "DEBT", label: "Ná»£" },
+                  { code: "PAID", label: "Thanh toán tất" },
+                  { code: "PARTIAL", label: "Trả 1 phần" },
+                  { code: "DEBT", label: "Nợ" },
                 ].map((st) => (
                   <button
                     key={st.code}
@@ -1161,7 +1213,7 @@ export default function CreateOrderPage() {
             {paymentStatus === "PARTIAL" && (
               <div className="mt-4">
                 <label className="block text-sm font-semibold text-slate-800 mb-2">
-                  Sá»‘ tiá»n Ä‘Ă£ tráº£ trÆ°á»›c
+                  Số tiền đã trả trước
                 </label>
                 <CurrencyInput
                   value={partialAmount || 0}
@@ -1178,8 +1230,8 @@ export default function CreateOrderPage() {
                   }`}
                 >
                   {isPartialOverpay
-                    ? "Sá»‘ tiá»n Ä‘Ă£ tráº£ khĂ´ng Ä‘Æ°á»£c lá»›n hÆ¡n tá»•ng Ä‘Æ¡n."
-                    : "KhĂ´ng Ä‘Æ°á»£c lá»›n hÆ¡n tá»•ng Ä‘Æ¡n."}
+                    ? "Số tiền đã trả không được lớn hơn tổng đơn."
+                    : "Không được lớn hơn tổng đơn."}
                 </p>
               </div>
             )}
@@ -1196,7 +1248,7 @@ export default function CreateOrderPage() {
                       : "border-slate-200 text-slate-700 hover:bg-slate-50"
                   } ${!partialReady ? "opacity-50 cursor-not-allowed" : ""}`}
                 >
-                  Tiá»n máº·t
+                  Tiền mặt
                 </button>
                 <button
                   type="button"
@@ -1211,13 +1263,13 @@ export default function CreateOrderPage() {
                       : "border-rose-200 text-rose-700 hover:bg-rose-50"
                   } ${!partialReady ? "opacity-50 cursor-not-allowed" : ""}`}
                 >
-                  Chuyá»ƒn khoáº£n
+                  Chuyển khoản
                 </button>
               </div>
             )}
             {!partialReady && paymentStatus === "PARTIAL" && (
               <p className="mt-2 text-xs text-slate-500">
-                Nháº­p sá»‘ tiá»n Ä‘Ă£ tráº£ trÆ°á»›c Ä‘á»ƒ chá»n phÆ°Æ¡ng thá»©c thanh toĂ¡n.
+                Nhập số tiền đã trả trước để chọn phương thức thanh toán.
               </p>
             )}
 
@@ -1225,7 +1277,7 @@ export default function CreateOrderPage() {
               <div className="mt-4 rounded-xl border border-rose-200/60 bg-rose-50/40">
                 {isLoadingBankConfig && (
                   <p className="text-sm text-slate-500">
-                    Äang táº£i thĂ´ng tin ngĂ¢n hĂ ng...
+                    Đang tải thông tin ngân hàng...
                   </p>
                 )}
                 {!isLoadingBankConfig && bankError && (
@@ -1253,7 +1305,7 @@ export default function CreateOrderPage() {
                             const paid = Number(partialAmount || 0);
                             const remain = Math.max(total - paid, 0);
                             const remainText = remain.toLocaleString("vi-VN");
-                            return `${maPhieu} cĂ²n thiáº¿u ${remainText}Ä‘`;
+                            return `${maPhieu} còn thiếu ${remainText}đ`;
                           })(),
                         });
                         if (!qrUrl) return null;
@@ -1267,7 +1319,7 @@ export default function CreateOrderPage() {
                       })()}
                     </div>
                     <p className="text-center text-xs text-slate-500">
-                      QuĂ©t mĂ£ Ä‘á»ƒ chuyá»ƒn khoáº£n
+                      Quét mã để chuyển khoản
                     </p>
                   </div>
                 )}
@@ -1280,7 +1332,7 @@ export default function CreateOrderPage() {
                 onClick={closePaymentModal}
                 className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
               >
-                Há»§y
+                Hủy
               </button>
               <button
                 type="button"
@@ -1292,7 +1344,9 @@ export default function CreateOrderPage() {
                     : "bg-gradient-to-r from-rose-700 to-rose-500 hover:shadow-lg hover:shadow-rose-700/25"
                 }`}
               >
-                {paymentStatus === "DEBT" ? "XĂ¡c nháº­n ná»£" : "XĂ¡c nháº­n thanh toĂ¡n"}
+                {paymentStatus === "DEBT"
+                  ? "Xác nhận nợ"
+                  : "Xác nhận thanh toán"}
               </button>
             </div>
           </div>
@@ -1301,4 +1355,3 @@ export default function CreateOrderPage() {
     </main>
   );
 }
-

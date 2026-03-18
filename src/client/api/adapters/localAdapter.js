@@ -32,8 +32,20 @@ const MOCK_PRODUCTS = [
     donGiaBan: 10000,
     giaVon: 6000,
   },
-  { tenSanPham: "Mì gói Hảo Hảo", nhomHang: "Đồ đóng gói", donVi: "Gói", donGiaBan: 5000, giaVon: 3500 },
-  { tenSanPham: "Bánh Oreo", nhomHang: "Bánh kẹo", donVi: "Gói", donGiaBan: 15000, giaVon: 10000 },
+  {
+    tenSanPham: "Mì gói Hảo Hảo",
+    nhomHang: "Đồ đóng gói",
+    donVi: "Gói",
+    donGiaBan: 5000,
+    giaVon: 3500,
+  },
+  {
+    tenSanPham: "Bánh Oreo",
+    nhomHang: "Bánh kẹo",
+    donVi: "Gói",
+    donGiaBan: 15000,
+    giaVon: 10000,
+  },
   {
     tenSanPham: "Sữa tươi Vinamilk 180ml",
     nhomHang: "Nước",
@@ -610,6 +622,7 @@ const MOCK_ORDER_HISTORY = [
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let mockLatestOrderCode = "DH001";
+let mockLatestReceiptCode = "NK001";
 const foldText = (v) =>
   String(v || "")
     .toLowerCase()
@@ -649,7 +662,11 @@ const login = async (email, password) => {
   );
   if (user) {
     const { password: _, ...data } = user;
-    return { success: true, data, message: "Đăng nhập thành công! (Mock)" };
+    return {
+      success: true,
+      data,
+      message: "Đăng nhập thành công! (Mock)",
+    };
   }
   return {
     success: false,
@@ -703,6 +720,17 @@ const getNextOrderFormDefaults = async () => {
   };
 };
 
+const getNextInventoryReceiptDefaults = async () => {
+  await sleep(150);
+  return {
+    success: true,
+    data: {
+      maPhieu: incrementOrderCode(mockLatestReceiptCode),
+      ngayNhap: getTodayInputDate(),
+    },
+  };
+};
+
 const getProductCatalog = async () => {
   await sleep(150);
   return {
@@ -731,7 +759,10 @@ const updateProductCatalogItem = async (payload) => {
   const giaVon = Math.max(Number(p.giaVon || 0), 0);
 
   if (!originalTenSanPham || !originalDonVi) {
-    return { success: false, message: "Thiếu thông tin sản phẩm gốc (Mock)" };
+    return {
+      success: false,
+      message: "Thiếu thông tin sản phẩm gốc (Mock)",
+    };
   }
   if (!tenSanPham)
     return {
@@ -739,9 +770,15 @@ const updateProductCatalogItem = async (payload) => {
       message: "Tên sản phẩm không được để trống (Mock)",
     };
   if (!donVi)
-    return { success: false, message: "Đơn vị không được để trống (Mock)" };
+    return {
+      success: false,
+      message: "Đơn vị không được để trống (Mock)",
+    };
   if (donGiaBan <= 0)
-    return { success: false, message: "Đơn giá bán phải lớn hơn 0 (Mock)" };
+    return {
+      success: false,
+      message: "Đơn giá bán phải lớn hơn 0 (Mock)",
+    };
 
   const oldKey = `${foldText(originalTenSanPham)}||${foldText(originalDonVi)}`;
   const newKey = `${foldText(tenSanPham)}||${foldText(donVi)}`;
@@ -777,7 +814,10 @@ const updateProductCatalogItem = async (payload) => {
       giaVon,
     };
   }
-  return { success: true, message: "Cập nhật sản phẩm thành công! (Mock)" };
+  return {
+    success: true,
+    message: "Cập nhật sản phẩm thành công! (Mock)",
+  };
 };
 
 const createProductCatalogItem = async (payload) => {
@@ -795,9 +835,15 @@ const createProductCatalogItem = async (payload) => {
       message: "Tên sản phẩm không được để trống (Mock)",
     };
   if (!donVi)
-    return { success: false, message: "Đơn vị không được để trống (Mock)" };
+    return {
+      success: false,
+      message: "Đơn vị không được để trống (Mock)",
+    };
   if (donGiaBan <= 0)
-    return { success: false, message: "Đơn giá bán phải lớn hơn 0 (Mock)" };
+    return {
+      success: false,
+      message: "Đơn giá bán phải lớn hơn 0 (Mock)",
+    };
   const key = `${foldText(tenSanPham)}||${foldText(donVi)}`;
   const existed = MOCK_PRODUCTS.some(
     (x) => `${foldText(x.tenSanPham)}||${foldText(x.donVi)}` === key,
@@ -809,7 +855,10 @@ const createProductCatalogItem = async (payload) => {
     };
 
   MOCK_PRODUCTS.push({ tenSanPham, nhomHang, donVi, donGiaBan, giaVon });
-  return { success: true, message: "Đã thêm sản phẩm thành công! (Mock)" };
+  return {
+    success: true,
+    message: "Đã thêm sản phẩm thành công! (Mock)",
+  };
 };
 
 const deleteProductCatalogItem = async (payload) => {
@@ -818,7 +867,10 @@ const deleteProductCatalogItem = async (payload) => {
   const tenSanPham = String(p.tenSanPham || "").trim();
   const donVi = String(p.donVi || "").trim();
   if (!tenSanPham || !donVi)
-    return { success: false, message: "Thiếu tên sản phẩm hoặc đơn vị (Mock)" };
+    return {
+      success: false,
+      message: "Thiếu tên sản phẩm hoặc đơn vị (Mock)",
+    };
   const key = `${foldText(tenSanPham)}||${foldText(donVi)}`;
   const before = MOCK_PRODUCTS.length;
   for (let i = MOCK_PRODUCTS.length - 1; i >= 0; i--) {
@@ -831,7 +883,10 @@ const deleteProductCatalogItem = async (payload) => {
     }
   }
   if (before === MOCK_PRODUCTS.length)
-    return { success: false, message: "Không tìm thấy sản phẩm để xóa (Mock)" };
+    return {
+      success: false,
+      message: "Không tìm thấy sản phẩm để xóa (Mock)",
+    };
   return { success: true, message: "Đã xóa sản phẩm! (Mock)" };
 };
 
@@ -936,7 +991,10 @@ const updateDebtCustomer = async (payload) => {
     MOCK_CUSTOMERS.push({ tenKhach, soDienThoai });
   }
 
-  return { success: true, message: "Cập nhật công nợ thành công! (Mock)" };
+  return {
+    success: true,
+    message: "Cập nhật công nợ thành công! (Mock)",
+  };
 };
 
 const settleAllDebtCustomers = async () => {
@@ -982,12 +1040,50 @@ const createOrder = async (orderData) => {
 
   console.log("[Mock] DON_HANG rows:", orderRows);
   if (customerRow) console.log("[Mock] KHACH row:", customerRow);
-  return { success: true, message: "Đơn hàng đã được tạo thành công! (Mock)" };
+  return {
+    success: true,
+    message: "Đơn hàng đã được tạo thành công! (Mock)",
+  };
 };
 
 const createInventoryReceipt = async (payload) => {
   await sleep(600);
   console.log("[Mock] Nhập Kho Payload:", payload);
+
+  if (payload?.receiptInfo?.maPhieu) {
+    mockLatestReceiptCode = String(payload.receiptInfo.maPhieu).trim();
+  }
+
+  if (payload && payload.products && payload.receiptInfo) {
+    payload.products.forEach((p) => {
+      MOCK_RECEIPT_HISTORY.unshift({
+        maPhieu: payload.receiptInfo.maPhieu,
+        ngayNhap: payload.receiptInfo.ngayNhap,
+        nhaCungCap: payload.receiptInfo.nhaCungCap,
+        maSanPham: p.maSanPham || "",
+        tenSanPham: p.tenSanPham,
+        nhomHang: p.nhomHang || "",
+        hanSuDung: p.hanSuDung || "",
+        donVi: p.donVi,
+        soLuong: Number(p.soLuong || 0),
+        donGiaNhap: Number(p.giaNhap ?? p.donGiaNhap ?? 0),
+        thanhTien:
+          Number(p.soLuong || 0) * Number(p.giaNhap ?? p.donGiaNhap ?? 0),
+        tongTienPhieu: payload.receiptInfo.tongTienPhieu || 0,
+        ghiChu: payload.receiptInfo.ghiChu || "",
+        trangThai: payload.receiptInfo.trangThai || "",
+      });
+
+      const prodIdx = MOCK_PRODUCTS.findIndex(
+        (mp) => mp.tenSanPham === p.tenSanPham && mp.donVi === p.donVi,
+      );
+      if (prodIdx >= 0) {
+        MOCK_PRODUCTS[prodIdx].tonKho =
+          (MOCK_PRODUCTS[prodIdx].tonKho || 0) + Number(p.soLuong || 0);
+      }
+    });
+  }
+
   return { success: true, message: "Nhập kho thành công! (Mock)" };
 };
 
@@ -999,13 +1095,19 @@ const updateOrder = async (payload) => {
   if (!maPhieuOriginal)
     return { success: false, message: "Thiếu mã phiếu gốc (Mock)" };
   if (!products.length)
-    return { success: false, message: "Đơn hàng phải có sản phẩm (Mock)" };
+    return {
+      success: false,
+      message: "Đơn hàng phải có sản phẩm (Mock)",
+    };
 
   const idx = MOCK_ORDER_HISTORY.findIndex(
     (o) => o.maPhieu === maPhieuOriginal,
   );
   if (idx < 0)
-    return { success: false, message: "Không tìm thấy hóa đơn để sửa (Mock)" };
+    return {
+      success: false,
+      message: "Không tìm thấy hóa đơn để sửa (Mock)",
+    };
 
   const tongHoaDon = products.reduce(
     (sum, p) => sum + Number(p.soLuong || 0) * Number(p.donGiaBan || 0),
@@ -1044,7 +1146,10 @@ const updateOrder = async (payload) => {
     })),
   };
 
-  return { success: true, message: "Cập nhật hóa đơn thành công! (Mock)" };
+  return {
+    success: true,
+    message: "Cập nhật hóa đơn thành công! (Mock)",
+  };
 };
 
 const deleteOrder = async (maPhieu) => {
@@ -1058,7 +1163,10 @@ const deleteOrder = async (maPhieu) => {
     }
   }
   if (before === MOCK_ORDER_HISTORY.length) {
-    return { success: false, message: "Không tìm thấy hóa đơn để xóa (Mock)" };
+    return {
+      success: false,
+      message: "Không tìm thấy hóa đơn để xóa (Mock)",
+    };
   }
   return { success: true, message: "Xóa hóa đơn thành công! (Mock)" };
 };
@@ -1075,6 +1183,68 @@ const createReceiptPdf = async (maPhieu) => {
   };
 };
 
+const getInventory = async () => {
+  await sleep(150);
+  // Merge MOCK_PRODUCTS with some random tonKho for testing
+  return {
+    success: true,
+    data: MOCK_PRODUCTS.map((p) => ({
+      ...p,
+      tonKho:
+        p.tonKho !== undefined ? p.tonKho : Math.floor(Math.random() * 50) + 10,
+    })),
+  };
+};
+
+const MOCK_RECEIPT_HISTORY = [
+  {
+    maPhieu: "NH001",
+    ngayNhap: "2023-10-01",
+    nhaCungCap: "NCC A",
+    tenSanPham: "Sản phẩm 1",
+    donVi: "Cái",
+    soLuong: 100,
+    donGiaNhap: 50000,
+    thanhTien: 5000000,
+    tongTienPhieu: 15000000,
+    ghiChu: "",
+  },
+  {
+    maPhieu: "NH001",
+    ngayNhap: "2023-10-01",
+    nhaCungCap: "NCC A",
+    tenSanPham: "Sản phẩm 2",
+    donVi: "Hộp",
+    soLuong: 50,
+    donGiaNhap: 200000,
+    thanhTien: 10000000,
+    tongTienPhieu: 15000000,
+    ghiChu: "",
+  },
+];
+
+const getReceiptHistory = async () => {
+  await sleep(150);
+  return {
+    success: true,
+    data: MOCK_RECEIPT_HISTORY,
+  };
+};
+
+const getAppSetting = async (key) => {
+  await sleep(150);
+  const val = localStorage.getItem("app_setting_" + key);
+  return { success: true, data: val };
+};
+
+const setAppSetting = async (payload) => {
+  await sleep(150);
+  if (!payload || !payload.key)
+    return { success: false, message: "Missing key" };
+  localStorage.setItem("app_setting_" + payload.key, String(payload.value));
+  return { success: true, message: "Đã lưu cài đặt (Mock)" };
+};
+
 const call = async (fnName, ...args) => {
   console.log(`[Local Mock API] call: ${fnName}`, args);
   if (fnName === "helloServer") return helloServer();
@@ -1083,6 +1253,8 @@ const call = async (fnName, ...args) => {
   if (fnName === "getDemoAccounts") return getDemoAccounts();
   if (fnName === "getGlobalNotice") return getGlobalNotice();
   if (fnName === "getNextOrderFormDefaults") return getNextOrderFormDefaults();
+  if (fnName === "getNextInventoryReceiptDefaults")
+    return getNextInventoryReceiptDefaults();
   if (fnName === "getProductCatalog") return getProductCatalog();
   if (fnName === "getBankConfig") return getBankConfig();
   if (fnName === "updateProductCatalogItem")
@@ -1102,10 +1274,12 @@ const call = async (fnName, ...args) => {
     return createInventoryReceipt(args[0]);
   if (fnName === "updateOrder") return updateOrder(args[0]);
   if (fnName === "deleteOrder") return deleteOrder(args[0]);
+  if (fnName === "getInventory") return getInventory();
+  if (fnName === "getReceiptHistory") return getReceiptHistory();
+  if (fnName === "getAppSetting") return getAppSetting(args[0]);
+  if (fnName === "setAppSetting") return setAppSetting(args[0]);
 
-  throw new Error(
-    `[Local Mock API] Function ${fnName} not implemented in localAdapter`,
-  );
+  return { success: false, message: `Hàm ${fnName} chưa được mock.` };
 };
 
 export const localAdapter = {
@@ -1116,6 +1290,7 @@ export const localAdapter = {
   getDemoAccounts,
   getGlobalNotice,
   getNextOrderFormDefaults,
+  getNextInventoryReceiptDefaults,
   getProductCatalog,
   getBankConfig,
   updateProductCatalogItem,
@@ -1131,4 +1306,8 @@ export const localAdapter = {
   createInventoryReceipt,
   updateOrder,
   deleteOrder,
+  getInventory,
+  getReceiptHistory,
+  getAppSetting,
+  setAppSetting,
 };

@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useState } from "react"
-import toast from "react-hot-toast"
+import { useEffect, useMemo, useState } from "react";
+import toast from "react-hot-toast";
 import {
   createProductCatalogItem,
   deleteProductCatalogItem,
   getProductCatalog,
   updateProductCatalogItem,
-} from "../api"
+} from "../api";
 
-const toNum = (v) => Number(String(v ?? "").replace(/[^\d.-]/g, "")) || 0
-const fmt = (n) => Number(n || 0).toLocaleString("vi-VN")
+const toNum = (v) => Number(String(v ?? "").replace(/[^\d.-]/g, "")) || 0;
+const fmt = (n) => Number(n || 0).toLocaleString("vi-VN");
 
 const foldText = (v) =>
   String(v || "")
@@ -16,39 +16,48 @@ const foldText = (v) =>
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
-    .trim()
+    .trim();
 
 function MoneyInput({ value, onChange, placeholder, className = "" }) {
-  const [display, setDisplay] = useState(value ? fmt(value) : "")
+  const [display, setDisplay] = useState(value ? fmt(value) : "");
 
   useEffect(() => {
-    setDisplay(value ? fmt(value) : "")
-  }, [value])
+    setDisplay(value ? fmt(value) : "");
+  }, [value]);
 
   return (
     <input
       value={display}
       onChange={(e) => {
-        const digits = String(e.target.value || "").replace(/[^\d]/g, "")
-        const n = digits ? Number(digits) : 0
-        setDisplay(digits ? fmt(n) : "")
-        onChange(n)
+        const digits = String(e.target.value || "").replace(/[^\d]/g, "");
+        const n = digits ? Number(digits) : 0;
+        setDisplay(digits ? fmt(n) : "");
+        onChange(n);
       }}
       inputMode="numeric"
       placeholder={placeholder}
       className={`w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 pt-2 pb-1.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all ${className}`}
     />
-  )
+  );
 }
 
-function LabeledMoneyInput({ label, tone = "rose", value, onChange, placeholder }) {
+function LabeledMoneyInput({
+  label,
+  tone = "rose",
+  value,
+  onChange,
+  placeholder,
+  className = "",
+}) {
   const toneCls =
     tone === "emerald"
       ? "border-emerald-200 bg-emerald-50/60 text-emerald-800"
-      : "border-rose-200 bg-rose-50/60 text-rose-800"
+      : "border-rose-200 bg-rose-50/60 text-rose-800";
   return (
-    <div className={`h-11 rounded-xl border px-2.5 py-1.5 ${toneCls} grid grid-cols-[auto,1fr] items-stretch gap-2`}>
-      <span className="inline-flex self-center pt-0.5 min-w-[56px] items-center justify-start text-[11px] font-bold uppercase tracking-wide leading-none whitespace-nowrap">
+    <div
+      className={`h-11 rounded-xl border px-2.5 py-1.5 ${toneCls} grid grid-cols-[auto,1fr] items-stretch gap-2 ${className}`}
+    >
+      <span className="inline-flex self-center pt-0.5 min-w-[84px] items-center justify-start text-[11px] font-bold uppercase tracking-wide leading-none whitespace-nowrap">
         {label}
       </span>
       <MoneyInput
@@ -58,23 +67,31 @@ function LabeledMoneyInput({ label, tone = "rose", value, onChange, placeholder 
         className="h-full py-0.5 leading-none bg-white"
       />
     </div>
-  )
+  );
 }
 
-function LabeledTextInput({ label, value, onChange, placeholder }) {
+function LabeledTextInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  className = "",
+}) {
   return (
-    <div className="h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-2.5 py-1.5 grid grid-cols-[auto,1fr] items-stretch gap-2 text-slate-700">
-      <span className="inline-flex self-center pt-0.5 min-w-[72px] items-center justify-start text-[11px] font-bold uppercase tracking-wide leading-none whitespace-nowrap text-slate-500">
+    <div
+      className={`h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-2.5 py-1.5 grid grid-cols-[auto,1fr] items-stretch gap-2 text-slate-700 ${className}`}
+    >
+      <span className="inline-flex self-center pt-0.5 min-w-[84px] items-center justify-start text-[11px] font-bold uppercase tracking-wide leading-none whitespace-nowrap text-slate-500">
         {label}
       </span>
       <input
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        className="w-full h-full py-0.5 leading-none bg-white rounded-lg border border-slate-200 px-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
+        className="w-full h-full rounded-xl border border-slate-200 bg-white px-3 pt-2 pb-1.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
       />
     </div>
-  )
+  );
 }
 
 const toViewRow = (p, idx) => ({
@@ -88,53 +105,53 @@ const toViewRow = (p, idx) => ({
   donVi: String(p.donVi || ""),
   donGiaBan: toNum(p.donGiaBan),
   giaVon: toNum(p.giaVon),
-})
+});
 
 export default function ProductsPage() {
-  const [loading, setLoading] = useState(true)
-  const [savingKey, setSavingKey] = useState("")
-  const [deletingKey, setDeletingKey] = useState("")
-  const [query, setQuery] = useState("")
-  const [openId, setOpenId] = useState("")
-  const [rows, setRows] = useState([])
-  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [loading, setLoading] = useState(true);
+  const [savingKey, setSavingKey] = useState("");
+  const [deletingKey, setDeletingKey] = useState("");
+  const [query, setQuery] = useState("");
+  const [openId, setOpenId] = useState("");
+  const [rows, setRows] = useState([]);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const loadProducts = async () => {
-    setLoading(true)
+    setLoading(true);
     try {
-      const res = await getProductCatalog()
+      const res = await getProductCatalog();
       if (res?.success && Array.isArray(res.data)) {
-        setRows(res.data.map((p, idx) => toViewRow(p, idx)))
+        setRows(res.data.map((p, idx) => toViewRow(p, idx)));
       } else {
-        setRows([])
-        if (res?.message) toast.error(res.message)
+        setRows([]);
+        if (res?.message) toast.error(res.message);
       }
     } catch (e) {
-      setRows([])
-      toast.error("Không tải được danh sách sản phẩm")
+      setRows([]);
+      toast.error("Không tải được danh sách sản phẩm");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    loadProducts()
-  }, [])
+    loadProducts();
+  }, []);
 
   const filteredRows = useMemo(() => {
-    const q = foldText(query)
-    if (!q) return rows
+    const q = foldText(query);
+    if (!q) return rows;
     return rows.filter((r) =>
       foldText(`${r.tenSanPham} ${r.nhomHang} ${r.donVi}`).includes(q),
-    )
-  }, [rows, query])
+    );
+  }, [rows, query]);
 
   const patchRow = (id, patch) => {
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)))
-  }
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  };
 
   const addProductDraft = () => {
-    const id = `new-${Date.now()}`
+    const id = `new-${Date.now()}`;
     setRows((prev) => [
       {
         id,
@@ -149,98 +166,119 @@ export default function ProductsPage() {
         giaVon: 0,
       },
       ...prev,
-    ])
-    setOpenId(id)
-  }
+    ]);
+    setOpenId(id);
+  };
 
   const removeDraft = (id) => {
-    setRows((prev) => prev.filter((r) => r.id !== id))
-    if (openId === id) setOpenId("")
-  }
+    setRows((prev) => prev.filter((r) => r.id !== id));
+    if (openId === id) setOpenId("");
+  };
+
+  const [showInventory, setShowInventory] = useState(
+    () => localStorage.getItem("enable_inventory") === "true",
+  );
+
+  useEffect(() => {
+    const handleSettingChange = (e) => setShowInventory(e.detail);
+    window.addEventListener("inventory_setting_changed", handleSettingChange);
+    return () =>
+      window.removeEventListener(
+        "inventory_setting_changed",
+        handleSettingChange,
+      );
+  }, []);
 
   const validateRow = (row) => {
-    const tenSanPham = String(row.tenSanPham || "").trim()
-    const nhomHang = String(row.nhomHang || "").trim()
-    const donVi = String(row.donVi || "").trim()
-    const donGiaBan = Math.max(toNum(row.donGiaBan), 0)
-    const giaVon = Math.max(toNum(row.giaVon), 0)
+    const tenSanPham = String(row.tenSanPham || "").trim();
+    const nhomHang = String(row.nhomHang || "").trim();
+    const donVi = String(row.donVi || "").trim();
+    const donGiaBan = Math.max(toNum(row.donGiaBan), 0);
+    const giaVon = Math.max(toNum(row.giaVon), 0);
 
-    if (!tenSanPham) return { ok: false, message: "Tên sản phẩm không được để trống" }
-    if (!donVi) return { ok: false, message: "Đơn vị không được để trống" }
-    if (donGiaBan <= 0) return { ok: false, message: "Đơn giá bán phải lớn hơn 0" }
-    return { ok: true, data: { tenSanPham, nhomHang, donVi, donGiaBan, giaVon } }
-  }
+    if (!tenSanPham)
+      return { ok: false, message: "Tên sản phẩm không được để trống" };
+    if (!donVi) return { ok: false, message: "Đơn vị không được để trống" };
+    if (donGiaBan <= 0)
+      return { ok: false, message: "Đơn giá bán phải lớn hơn 0" };
+    return {
+      ok: true,
+      data: { tenSanPham, nhomHang, donVi, donGiaBan, giaVon },
+    };
+  };
 
   const handleSaveRow = async (row) => {
-    const validated = validateRow(row)
-    if (!validated.ok) return toast.error(validated.message)
-    const data = validated.data
+    const validated = validateRow(row);
+    if (!validated.ok) return toast.error(validated.message);
+    const data = validated.data;
 
-    setSavingKey(row.id)
+    setSavingKey(row.id);
     try {
-      let res
+      let res;
       if (row.isNew) {
-        res = await createProductCatalogItem(data)
+        res = await createProductCatalogItem(data);
       } else {
         res = await updateProductCatalogItem({
           originalTenSanPham: row.originalTenSanPham,
           originalDonVi: row.originalDonVi,
           ...data,
-        })
+        });
       }
 
       if (!res?.success) {
-        toast.error(res?.message || "Lưu sản phẩm thất bại")
-        return
+        toast.error(res?.message || "Lưu sản phẩm thất bại");
+        return;
       }
 
-      toast.success(res.message || "Đã lưu sản phẩm")
-      await loadProducts()
-      setOpenId("")
+      toast.success(res.message || "Đã lưu sản phẩm");
+      await loadProducts();
+      setOpenId("");
     } catch (e) {
-      toast.error("Lưu sản phẩm thất bại")
+      toast.error("Lưu sản phẩm thất bại");
     } finally {
-      setSavingKey("")
+      setSavingKey("");
     }
-  }
+  };
 
   const handleDeleteRow = (row) => {
     if (row.isNew) {
-      removeDraft(row.id)
-      return
+      removeDraft(row.id);
+      return;
     }
-    setDeleteTarget(row)
-  }
+    setDeleteTarget(row);
+  };
 
   const confirmDeleteRow = async () => {
-    const row = deleteTarget
-    if (!row) return
-    setDeletingKey(row.id)
+    const row = deleteTarget;
+    if (!row) return;
+    setDeletingKey(row.id);
     try {
       const res = await deleteProductCatalogItem({
         tenSanPham: row.originalTenSanPham || row.tenSanPham,
         donVi: row.originalDonVi || row.donVi,
-      })
+      });
       if (!res?.success) {
-        toast.error(res?.message || "Xóa sản phẩm thất bại")
-        return
+        toast.error(res?.message || "Xóa sản phẩm thất bại");
+        return;
       }
-      toast.success(res.message || "Đã xóa sản phẩm")
-      await loadProducts()
-      setOpenId("")
-      setDeleteTarget(null)
+      toast.success(res.message || "Đã xóa sản phẩm");
+      await loadProducts();
+      setOpenId("");
+      setDeleteTarget(null);
     } catch (e) {
-      toast.error("Xóa sản phẩm thất bại")
+      toast.error("Xóa sản phẩm thất bại");
     } finally {
-      setDeletingKey("")
+      setDeletingKey("");
     }
-  }
+  };
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-50 to-rose-50/30">
       <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 md:py-8 pb-24">
         <div className="mb-6 md:mb-8">
-          <h1 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight">Danh sách sản phẩm</h1>
+          <h1 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight">
+            Danh sách sản phẩm
+          </h1>
           <p className="mt-2 text-sm md:text-base text-slate-500">
             Bấm vào icon bên phải để mở chi tiết, lưu hoặc xóa sản phẩm.
           </p>
@@ -282,7 +320,7 @@ export default function ProductsPage() {
         ) : (
           <div className="space-y-2">
             {filteredRows.map((row) => {
-              const open = openId === row.id
+              const open = openId === row.id;
               return (
                 <article
                   key={row.id}
@@ -294,17 +332,22 @@ export default function ProductsPage() {
                     type="button"
                     onClick={() => setOpenId(open ? "" : row.id)}
                     className={`w-full flex items-center gap-3 px-4 py-2 transition-colors ${
-                      open ? "bg-rose-50/60 hover:bg-rose-50" : "hover:bg-slate-50"
+                      open
+                        ? "bg-rose-50/60 hover:bg-rose-50"
+                        : "hover:bg-slate-50"
                     }`}
                   >
-                    <span className={`h-6 w-1.5 rounded-full ${open ? "bg-rose-300" : "bg-rose-100"}`} />
+                    <span
+                      className={`h-6 w-1.5 rounded-full ${open ? "bg-rose-300" : "bg-rose-100"}`}
+                    />
                     <div className="min-w-0 flex-1 text-left">
                       <p className="text-sm md:text-base font-bold text-slate-900 truncate">
                         {row.tenSanPham || "Sản phẩm mới"}
                       </p>
                       <p className="text-xs text-slate-500 truncate leading-tight">
-                        {(row.nhomHang ? `${row.nhomHang} • ` : "")}
+                        {row.nhomHang ? `${row.nhomHang} • ` : ""}
                         {row.donVi || "-"}
+                        {showInventory && ` • Tồn kho: ${row.tonKho || 0}`}
                       </p>
                     </div>
                     <span
@@ -315,7 +358,11 @@ export default function ProductsPage() {
                       }`}
                       aria-hidden="true"
                     >
-                      <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                      <svg
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        className="h-4 w-4"
+                      >
                         <path
                           fillRule="evenodd"
                           d="M5.23 7.21a.75.75 0 011.06.02L10 11.18l3.71-3.95a.75.75 0 111.1 1.02l-4.25 4.52a.75.75 0 01-1.1 0L5.21 8.25a.75.75 0 01.02-1.04z"
@@ -327,46 +374,59 @@ export default function ProductsPage() {
 
                   {open && (
                     <div className="border-t border-rose-100 bg-rose-50/30 p-4 space-y-3">
-                    <div className="grid gap-2 md:gap-3 md:grid-cols-2 lg:grid-cols-5">
-                      <LabeledTextInput
-                        label="Tên sản phẩm"
-                        value={row.tenSanPham}
-                        onChange={(e) => patchRow(row.id, { tenSanPham: e.target.value })}
-                        placeholder="Tên sản phẩm"
-                      />
-                      <LabeledTextInput
-                        label="Nhóm hàng"
-                        value={row.nhomHang}
-                        onChange={(e) => patchRow(row.id, { nhomHang: e.target.value })}
-                        placeholder="Nhóm hàng"
-                      />
-                      <LabeledTextInput
-                        label="Đơn vị"
-                        value={row.donVi}
-                        onChange={(e) => patchRow(row.id, { donVi: e.target.value })}
-                        placeholder="Đơn vị"
-                      />
-                      <LabeledMoneyInput
-                        label="Giá bán"
-                        tone="emerald"
-                        value={row.donGiaBan}
-                        onChange={(v) => patchRow(row.id, { donGiaBan: v })}
-                        placeholder="Đơn giá bán"
-                      />
-                      <LabeledMoneyInput
-                        label="Giá vốn"
-                        tone="rose"
-                        value={row.giaVon}
-                        onChange={(v) => patchRow(row.id, { giaVon: v })}
-                        placeholder="Giá vốn"
-                      />
-                    </div>
+                      <div className="grid gap-2 md:gap-3 md:grid-cols-2 lg:grid-cols-6">
+                        <LabeledTextInput
+                          className="lg:col-span-3"
+                          label="Tên sp"
+                          value={row.tenSanPham}
+                          onChange={(e) =>
+                            patchRow(row.id, { tenSanPham: e.target.value })
+                          }
+                          placeholder="Tên sản phẩm"
+                        />
+                        <LabeledTextInput
+                          className="lg:col-span-3"
+                          label="Nhóm hàng"
+                          value={row.nhomHang}
+                          onChange={(e) =>
+                            patchRow(row.id, { nhomHang: e.target.value })
+                          }
+                          placeholder="Nhóm hàng"
+                        />
+                        <LabeledTextInput
+                          className="lg:col-span-2"
+                          label="Đơn vị"
+                          value={row.donVi}
+                          onChange={(e) =>
+                            patchRow(row.id, { donVi: e.target.value })
+                          }
+                          placeholder="Đơn vị"
+                        />
+                        <LabeledMoneyInput
+                          className="lg:col-span-2"
+                          label="Giá bán"
+                          tone="emerald"
+                          value={row.donGiaBan}
+                          onChange={(v) => patchRow(row.id, { donGiaBan: v })}
+                          placeholder="Đơn giá bán"
+                        />
+                        <LabeledMoneyInput
+                          className="lg:col-span-2"
+                          label="Giá vốn"
+                          tone="rose"
+                          value={row.giaVon}
+                          onChange={(v) => patchRow(row.id, { giaVon: v })}
+                          placeholder="Giá vốn"
+                        />
+                      </div>
 
                       <div className="flex items-center justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => handleDeleteRow(row)}
-                          disabled={deletingKey === row.id || savingKey === row.id}
+                          disabled={
+                            deletingKey === row.id || savingKey === row.id
+                          }
                           className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
                         >
                           {deletingKey === row.id ? "Đang xóa..." : "Xóa"}
@@ -374,20 +434,24 @@ export default function ProductsPage() {
                         <button
                           type="button"
                           onClick={() => handleSaveRow(row)}
-                          disabled={savingKey === row.id || deletingKey === row.id}
+                          disabled={
+                            savingKey === row.id || deletingKey === row.id
+                          }
                           className={`rounded-xl px-4 py-2 text-sm font-semibold text-white ${
                             savingKey === row.id
                               ? "bg-slate-400"
                               : "bg-gradient-to-r from-rose-700 to-rose-500 hover:shadow-lg hover:shadow-rose-700/25"
                           }`}
                         >
-                          {savingKey === row.id ? "Đang lưu..." : "Lưu sản phẩm"}
+                          {savingKey === row.id
+                            ? "Đang lưu..."
+                            : "Lưu sản phẩm"}
                         </button>
                       </div>
                     </div>
                   )}
                 </article>
-              )
+              );
             })}
           </div>
         )}
@@ -402,7 +466,9 @@ export default function ProductsPage() {
             className="mx-auto mt-[18vh] w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-bold text-slate-900">Xác nhận xóa sản phẩm</h3>
+            <h3 className="text-base font-bold text-slate-900">
+              Xác nhận xóa sản phẩm
+            </h3>
             <p className="mt-2 text-sm text-slate-600">
               Bạn sắp xóa sản phẩm{" "}
               <span className="font-semibold text-slate-900">
@@ -410,7 +476,9 @@ export default function ProductsPage() {
               </span>
               .
             </p>
-            <p className="mt-1 text-xs text-rose-600">Hành động này không thể hoàn tác.</p>
+            <p className="mt-1 text-xs text-rose-600">
+              Hành động này không thể hoàn tác.
+            </p>
             <div className="mt-4 flex gap-2">
               <button
                 type="button"
@@ -433,5 +501,5 @@ export default function ProductsPage() {
         </div>
       )}
     </main>
-  )
+  );
 }

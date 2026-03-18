@@ -1,4 +1,4 @@
-﻿import esbuild from "esbuild";
+import esbuild from "esbuild";
 import fs from "fs";
 
 const result = await esbuild.build({
@@ -9,6 +9,7 @@ const result = await esbuild.build({
   platform: "neutral",
   treeShaking: false,
   write: false,
+  charset: "utf8",
   define: {
     "import.meta.env.DEV": "false",
     "import.meta.env.VITE_GAS_WEBAPP_URL": '""',

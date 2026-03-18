@@ -1,6 +1,10 @@
-import { useState, useMemo, useEffect } from "react";
+import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { getProductCatalog, createInventoryReceipt } from "../api";
+import {
+  createInventoryReceipt,
+  getNextInventoryReceiptDefaults,
+  getProductCatalog,
+} from "../api";
 
 const fmt = (n) => Number(n || 0).toLocaleString("vi-VN");
 
@@ -12,6 +16,39 @@ const toTitleCase = (str) => {
     .join(" ")
     .trim();
 };
+
+const RECEIPT_STATUS = {
+  PAID: "\u0110\u00e3 thanh to\u00e1n",
+  PARTIAL: "Tr\u1ea3 m\u1ed9t ph\u1ea7n",
+  DEBT: "N\u1ee3",
+};
+
+const RECEIPT_STATUS_OPTIONS = [
+  RECEIPT_STATUS.PAID,
+  RECEIPT_STATUS.PARTIAL,
+  RECEIPT_STATUS.DEBT,
+];
+
+const getTodayInputDate = () => {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return local.toISOString().split("T")[0];
+};
+
+const getReceiptStatusCode = (status) => {
+  if (status === RECEIPT_STATUS.PARTIAL) return "PARTIAL";
+  if (status === RECEIPT_STATUS.DEBT) return "DEBT";
+  return "PAID";
+};
+
+const createInitialReceiptInfo = () => ({
+  maPhieu: "",
+  ngayNhap: getTodayInputDate(),
+  ghiChu: "",
+  nhaCungCap: "",
+  trangThai: RECEIPT_STATUS.PAID,
+  soTienDaTra: 0,
+});
 
 function CurrencyInput({ value, onChange, className }) {
   const [display, setDisplay] = useState(value ? fmt(value) : "");
@@ -33,6 +70,68 @@ function CurrencyInput({ value, onChange, className }) {
       placeholder="0"
       className={className}
     />
+  );
+}
+
+function ReceiptStatusSelect({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const current = RECEIPT_STATUS_OPTIONS.includes(value)
+    ? value
+    : RECEIPT_STATUS.PAID;
+
+  useEffect(() => {
+    const onDocClick = (e) => {
+      if (!e.target.closest("#inventory-status-select")) setOpen(false);
+    };
+    const onEsc = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("touchstart", onDocClick);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("touchstart", onDocClick);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, []);
+
+  return (
+    <div id="inventory-status-select" className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-left text-sm text-slate-800 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+      >
+        {current}
+        <span
+          className={`absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+        >
+          v
+        </span>
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1.5 w-full rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+          {RECEIPT_STATUS_OPTIONS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => {
+                onChange(option);
+                setOpen(false);
+              }}
+              className={`block w-full rounded-lg px-3 py-2 text-left text-sm ${
+                option === current
+                  ? "bg-emerald-50 font-semibold text-emerald-700"
+                  : "text-slate-700 hover:bg-emerald-50"
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -61,6 +160,37 @@ function ProductListItem({ product, onUpdate, onRemove }) {
             <input
               value={form.tenSanPham}
               onChange={(e) => setForm({ ...form, tenSanPham: e.target.value })}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none transition-all"
+            />
+          </div>
+          <div className="col-span-2">
+            <label className="text-xs font-semibold text-slate-500 mb-1 block">
+              Nhóm hàng
+            </label>
+            <input
+              value={form.nhomHang || ""}
+              onChange={(e) => setForm({ ...form, nhomHang: e.target.value })}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none transition-all"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-500 mb-1 block">
+              Mã sản phẩm
+            </label>
+            <input
+              value={form.maSanPham || ""}
+              onChange={(e) => setForm({ ...form, maSanPham: e.target.value })}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none transition-all"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-500 mb-1 block">
+              Hạn sử dụng
+            </label>
+            <input
+              type="date"
+              value={form.hanSuDung || ""}
+              onChange={(e) => setForm({ ...form, hanSuDung: e.target.value })}
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none transition-all"
             />
           </div>
@@ -125,6 +255,12 @@ function ProductListItem({ product, onUpdate, onRemove }) {
           {product.tenSanPham}{" "}
           <span className="text-slate-400 font-normal">({product.donVi})</span>
         </p>
+        <p className="mt-1 text-xs text-slate-500">
+          Nhóm: {product.nhomHang || "-"}
+        </p>
+        <p className="mt-1 text-xs text-slate-500">
+          Mã SP: {product.maSanPham || "-"} • HSD: {product.hanSuDung || "-"}
+        </p>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500">
           <span>
             SL:{" "}
@@ -152,29 +288,49 @@ export default function InventoryPage({ user }) {
   const [products, setProducts] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showProductSuggestions, setShowProductSuggestions] = useState(false);
+  const [isLoadingReceiptDefaults, setIsLoadingReceiptDefaults] =
+    useState(true);
 
-  const getTodayInputDate = () => {
-    const now = new Date();
-    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
-    return local.toISOString().split("T")[0];
-  };
-
-  const [receiptInfo, setReceiptInfo] = useState({
-    maPhieu: `NK${Date.now()}`.slice(-8),
-    ngayNhap: getTodayInputDate(),
-    ghiChu: "",
-    nhaCungCap: "",
-  });
+  const [receiptInfo, setReceiptInfo] = useState(createInitialReceiptInfo);
 
   const [newProduct, setNewProduct] = useState({
+    maSanPham: "",
     tenSanPham: "",
+    nhomHang: "",
+    hanSuDung: "",
     donVi: "",
     soLuong: 1,
     giaNhap: 0,
   });
 
-  // Mock catalog load for suggestions
+  const loadReceiptDefaults = async ({ silent = false } = {}) => {
+    if (!silent) setIsLoadingReceiptDefaults(true);
+    const today = getTodayInputDate();
+
+    try {
+      const res = await getNextInventoryReceiptDefaults();
+      const maPhieu = String(res?.data?.maPhieu || "").trim() || "NK01";
+      const ngayNhap = String(res?.data?.ngayNhap || "").trim() || today;
+
+      setReceiptInfo((prev) => ({
+        ...prev,
+        maPhieu,
+        ngayNhap,
+      }));
+    } catch (err) {
+      setReceiptInfo((prev) => ({
+        ...prev,
+        maPhieu: prev.maPhieu || "NK01",
+        ngayNhap: prev.ngayNhap || today,
+      }));
+    } finally {
+      if (!silent) setIsLoadingReceiptDefaults(false);
+    }
+  };
+
   useEffect(() => {
+    loadReceiptDefaults();
+
     getProductCatalog().then((res) => {
       if (res?.success && Array.isArray(res.data)) {
         setProductCatalog(res.data);
@@ -187,13 +343,17 @@ export default function InventoryPage({ user }) {
     return {
       ...prev,
       tenSanPham: matched.tenSanPham || inputName,
+      nhomHang: matched.nhomHang || prev.nhomHang,
       donVi: matched.donVi || prev.donVi,
       giaNhap: matched.giaVon || prev.giaNhap, // Gợi ý giá vốn làm giá nhập mặc định
     };
   };
 
   const handleAddProduct = () => {
+    const maSanPham = String(newProduct.maSanPham || "").trim();
     const name = newProduct.tenSanPham.trim();
+    const group = String(newProduct.nhomHang || "").trim();
+    const hanSuDung = String(newProduct.hanSuDung || "").trim();
     const unit = newProduct.donVi.trim();
     const qty = Number(newProduct.soLuong) || 0;
     const price = Number(newProduct.giaNhap) || 0;
@@ -206,7 +366,10 @@ export default function InventoryPage({ user }) {
     setProducts((prev) => [
       {
         id: Date.now().toString(),
+        maSanPham,
         tenSanPham: name,
+        nhomHang: group,
+        hanSuDung,
         donVi: unit,
         soLuong: qty,
         giaNhap: price,
@@ -214,7 +377,15 @@ export default function InventoryPage({ user }) {
       ...prev,
     ]);
 
-    setNewProduct({ tenSanPham: "", donVi: "", soLuong: 1, giaNhap: 0 });
+    setNewProduct({
+      maSanPham: "",
+      tenSanPham: "",
+      nhomHang: "",
+      hanSuDung: "",
+      donVi: "",
+      soLuong: 1,
+      giaNhap: 0,
+    });
     toast.success("Đã thêm vào phiếu");
   };
 
@@ -236,15 +407,33 @@ export default function InventoryPage({ user }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isLoadingReceiptDefaults)
+      return toast.error("Đang tải mã phiếu nhập mới, vui lòng chờ...");
     if (products.length === 0)
       return toast.error("Vui lòng thêm sản phẩm vào phiếu nhập");
+    if (receiptInfo.trangThai === RECEIPT_STATUS.PARTIAL) {
+      const paid = Number(receiptInfo.soTienDaTra || 0);
+      if (paid <= 0) return toast.error("Vui lòng nhập số tiền đã trả trước");
+      if (paid > totalAmount)
+        return toast.error("Số tiền đã trả không được lớn hơn tổng phiếu nhập");
+    }
 
     setIsSubmitting(true);
     try {
       const payload = {
-        receiptInfo,
+        receiptInfo: {
+          ...receiptInfo,
+          trangThaiCode: getReceiptStatusCode(receiptInfo.trangThai),
+          soTienDaTra:
+            receiptInfo.trangThai === RECEIPT_STATUS.PARTIAL
+              ? Number(receiptInfo.soTienDaTra || 0)
+              : 0,
+        },
         products: products.map((p) => ({
+          maSanPham: p.maSanPham || "",
           tenSanPham: p.tenSanPham,
+          nhomHang: p.nhomHang || "",
+          hanSuDung: p.hanSuDung || "",
           donVi: p.donVi,
           soLuong: p.soLuong,
           giaNhap: p.giaNhap,
@@ -256,10 +445,8 @@ export default function InventoryPage({ user }) {
       if (res?.success) {
         toast.success("Tạo phiếu nhập kho thành công!");
         setProducts([]);
-        setReceiptInfo({
-          ...receiptInfo,
-          maPhieu: `NK${Date.now()}`.slice(-8),
-        });
+        setReceiptInfo(createInitialReceiptInfo());
+        await loadReceiptDefaults();
       } else {
         toast.error(res?.message || "Tạo phiếu nhập thất bại");
       }
@@ -316,12 +503,16 @@ export default function InventoryPage({ user }) {
                   <input
                     value={receiptInfo.maPhieu}
                     onChange={(e) =>
-                      setReceiptInfo({
-                        ...receiptInfo,
+                      setReceiptInfo((prev) => ({
+                        ...prev,
                         maPhieu: e.target.value,
-                      })
+                      }))
                     }
-                    placeholder="Mã phiếu tự động"
+                    placeholder={
+                      isLoadingReceiptDefaults
+                        ? "Đang tải mã phiếu..."
+                        : "Mã phiếu tự động"
+                    }
                     className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
                   />
                 </div>
@@ -333,30 +524,62 @@ export default function InventoryPage({ user }) {
                     type="date"
                     value={receiptInfo.ngayNhap}
                     onChange={(e) =>
-                      setReceiptInfo({
-                        ...receiptInfo,
+                      setReceiptInfo((prev) => ({
+                        ...prev,
                         ngayNhap: e.target.value,
-                      })
+                      }))
                     }
                     className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
                   />
                 </div>
                 <div className="sm:col-span-2">
                   <label className="mb-1.5 block text-xs font-semibold text-slate-500">
-                    Nhà cung cấp
+                    Mã hóa đơn nhà cung cấp
                   </label>
                   <input
                     value={receiptInfo.nhaCungCap}
                     onChange={(e) =>
-                      setReceiptInfo({
-                        ...receiptInfo,
+                      setReceiptInfo((prev) => ({
+                        ...prev,
                         nhaCungCap: e.target.value,
-                      })
+                      }))
                     }
-                    placeholder="Tên nhà cung cấp (không bắt buộc)"
+                    placeholder="Mã hóa đơn NCC (không bắt buộc)"
                     className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
                   />
                 </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+                    Trạng thái
+                  </label>
+                  <ReceiptStatusSelect
+                    value={receiptInfo.trangThai}
+                    onChange={(nextStatus) =>
+                      setReceiptInfo((prev) => ({
+                        ...prev,
+                        trangThai: nextStatus,
+                        soTienDaTra:
+                          nextStatus === RECEIPT_STATUS.PARTIAL
+                            ? prev.soTienDaTra
+                            : 0,
+                      }))
+                    }
+                  />
+                </div>
+                {receiptInfo.trangThai === RECEIPT_STATUS.PARTIAL && (
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+                      Đã trả trước
+                    </label>
+                    <CurrencyInput
+                      value={Number(receiptInfo.soTienDaTra || 0)}
+                      onChange={(v) =>
+                        setReceiptInfo((prev) => ({ ...prev, soTienDaTra: v }))
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
+                    />
+                  </div>
+                )}
                 <div className="sm:col-span-2">
                   <label className="mb-1.5 block text-xs font-semibold text-slate-500">
                     Ghi chú
@@ -364,7 +587,10 @@ export default function InventoryPage({ user }) {
                   <input
                     value={receiptInfo.ghiChu}
                     onChange={(e) =>
-                      setReceiptInfo({ ...receiptInfo, ghiChu: e.target.value })
+                      setReceiptInfo((prev) => ({
+                        ...prev,
+                        ghiChu: e.target.value,
+                      }))
                     }
                     placeholder="Ghi chú thêm về lô hàng nhập..."
                     className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
@@ -380,7 +606,7 @@ export default function InventoryPage({ user }) {
                   Thêm mặt hàng nhập
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Sản phẩm có cùng đơn vị trong hệ thống sẽ được ưu tiên chọn
+                  Sản phẩm sẽ tự điền nhóm hàng và đơn vị theo sheet SAN_PHAM
                 </p>
               </div>
 
@@ -477,6 +703,7 @@ export default function InventoryPage({ user }) {
                                   {p.tenSanPham}
                                 </p>
                                 <p className="text-xs text-slate-500">
+                                  {p.nhomHang || "Chưa phân nhóm"} •{" "}
                                   {p.donVi || "-"} • Vốn HT:{" "}
                                   {fmt(p.giaVon || 0)}
                                 </p>
@@ -487,6 +714,55 @@ export default function InventoryPage({ user }) {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3 md:gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Mã sản phẩm
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ví dụ: SP001"
+                      value={newProduct.maSanPham}
+                      onChange={(e) =>
+                        setNewProduct({ ...newProduct, maSanPham: e.target.value })
+                      }
+                      className={inputCls}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Hạn sử dụng
+                    </label>
+                    <input
+                      type="date"
+                      value={newProduct.hanSuDung}
+                      onChange={(e) =>
+                        setNewProduct({ ...newProduct, hanSuDung: e.target.value })
+                      }
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 md:gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Nhóm hàng
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Đồ uống, thực phẩm..."
+                      value={newProduct.nhomHang}
+                      onChange={(e) =>
+                        setNewProduct({ ...newProduct, nhomHang: e.target.value })
+                      }
+                      onBlur={() =>
+                        setNewProduct((prev) => ({
+                          ...prev,
+                          nhomHang: toTitleCase(prev.nhomHang),
+                        }))
+                      }
+                      className={inputCls}
+                    />
+                  </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-800 mb-2">
                       Đơn vị
@@ -507,6 +783,8 @@ export default function InventoryPage({ user }) {
                       className={inputCls}
                     />
                   </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 md:gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-slate-800 mb-2">
                       Số lượng nhập
@@ -522,28 +800,28 @@ export default function InventoryPage({ user }) {
                           soLuong:
                             e.target.value === ""
                               ? ""
-                              : parseInt(e.target.value) || 0,
+                              : parseInt(e.target.value, 10) || 0,
                         })
                       }
                       onBlur={() => {
                         if (newProduct.soLuong === "" || newProduct.soLuong < 1)
-                          setNewProduct({ ...newProduct, soLuong: 1 });
+                          setNewProduct((prev) => ({ ...prev, soLuong: 1 }));
                       }}
                       className={inputCls}
                     />
                   </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    Giá nhập (Giá vốn mới)
-                  </label>
-                  <CurrencyInput
-                    value={newProduct.giaNhap}
-                    onChange={(v) =>
-                      setNewProduct({ ...newProduct, giaNhap: v })
-                    }
-                    className={inputCls}
-                  />
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Giá nhập (Giá vốn mới)
+                    </label>
+                    <CurrencyInput
+                      value={newProduct.giaNhap}
+                      onChange={(v) =>
+                        setNewProduct({ ...newProduct, giaNhap: v })
+                      }
+                      className={inputCls}
+                    />
+                  </div>
                 </div>
                 <button
                   type="button"

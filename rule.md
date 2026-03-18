@@ -1,4 +1,4 @@
-﻿# BẮT BUỘC: CONCURRENCY GUARD (LOCK + QUEUE)
+# BẮT BUỘC: CONCURRENCY GUARD (LOCK + QUEUE)
 
 Tất cả API ghi dữ liệu GAS phải chạy trong `DocumentLock` và có hàng đợi (QUEUE) để tránh đè dữ liệu khi nhiều người thao tác cùng lúc.
 

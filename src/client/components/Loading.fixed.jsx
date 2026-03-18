@@ -1,11 +1,11 @@
-�/**
- * Loading Component - d�ng chung cho mọi API call
+/**
+ * Loading Component - dùng chung cho mọi API call
  *
  * Usage:
  *   <Loading />                        - spinner nhỏ inline
- *   <Loading size="lg" />              - spinner l�:n
+ *   <Loading size="lg" />              - spinner lớn
  *   <Loading overlay />                - full-screen overlay
- *   <Loading text="Đang tải..." />     - c� text
+ *   <Loading text="Đang tải..." />     - có text
  */
 export default function Loading({ size = "md", overlay = false, text = "" }) {
   const sizes = {

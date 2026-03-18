@@ -6,6 +6,7 @@ import HistoryPage from "./pages/history"
 import ReceiptPage from "./pages/receipt"
 import ProductsPage from "./pages/products"
 import InventoryPage from "./pages/inventory"
+import StockPage from "./pages/stock"
 import DebtPage from "./pages/debt"
 import StatsPage from "./pages/stats"
 import FloatingMenu from "./components/FloatingMenu"
@@ -44,6 +45,8 @@ function AppContent() {
           return <ProductsPage user={user} />
         case "inventory":
           return <InventoryPage user={user} />
+        case "stock":
+          return <StockPage user={user} />
         case "debt":
           return <DebtPage user={user} />
         case "stats":

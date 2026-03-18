@@ -9,6 +9,9 @@ export default defineConfig(({ mode }) => {
   const gasUrl = env.VITE_GAS_WEBAPP_URL || "";
 
   return {
+    esbuild: {
+      charset: "utf8",
+    },
     plugins: [
       react(),
       viteSingleFile(),

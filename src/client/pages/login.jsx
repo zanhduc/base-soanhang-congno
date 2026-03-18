@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react"
+import { useState, useEffect } from "react"
 import { login, call } from "../api/index.js"
 import { getNextOrderFormDefaults } from "../api"
 import brandLogo from "../assets/logo-dulia.jpg"

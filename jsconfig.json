@@ -1,9 +1,9 @@
 {
-    "compilerOptions": {
-      "module": "ESNext",
-      "moduleResolution": "bundler",
-      "jsx": "react-jsx",
-      "types": ["vite/client"]
-    },
-    "include": ["src"]
-  }
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "types": ["vite/client"]
+  },
+  "include": ["src"]
+}

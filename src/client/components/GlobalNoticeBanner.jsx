@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react"
+import { useState, useEffect } from "react"
 import { getGlobalNotice } from "../api/index.js"
 
 const LEVEL_CONFIG = {

@@ -12,6 +12,8 @@ export const getUserInfo = adapter.getUserInfo;
 export const getDemoAccounts = adapter.getDemoAccounts;
 export const getGlobalNotice = adapter.getGlobalNotice;
 export const getNextOrderFormDefaults = adapter.getNextOrderFormDefaults;
+export const getNextInventoryReceiptDefaults =
+  adapter.getNextInventoryReceiptDefaults;
 export const getProductCatalog = adapter.getProductCatalog;
 export const getBankConfig = adapter.getBankConfig;
 export const updateProductCatalogItem = adapter.updateProductCatalogItem;
@@ -27,5 +29,7 @@ export const createOrder = adapter.createOrder;
 export const createInventoryReceipt = adapter.createInventoryReceipt;
 export const updateOrder = adapter.updateOrder;
 export const deleteOrder = adapter.deleteOrder;
-
-
+export const getInventory = adapter.getInventory;
+export const getReceiptHistory = adapter.getReceiptHistory;
+export const getAppSetting = adapter.getAppSetting;
+export const setAppSetting = adapter.setAppSetting;
