@@ -4,7 +4,11 @@ import {
   createInventoryReceipt,
   getNextInventoryReceiptDefaults,
   getProductCatalog,
+  getInventorySuggestions,
+  getSupplierCatalog,
+  formatAllSheets,
 } from "../api";
+import { normalizeText as foldText } from "../../core/core";
 
 const fmt = (n) => Number(n || 0).toLocaleString("vi-VN");
 
@@ -46,6 +50,7 @@ const createInitialReceiptInfo = () => ({
   ngayNhap: getTodayInputDate(),
   ghiChu: "",
   nhaCungCap: "",
+  soDienThoai: "",
   trangThai: RECEIPT_STATUS.PAID,
   soTienDaTra: 0,
 });
@@ -105,9 +110,9 @@ function ReceiptStatusSelect({ value, onChange }) {
       >
         {current}
         <span
-          className={`absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
         >
-          v
+          <i className="ri-arrow-down-s-line text-lg"></i>
         </span>
       </button>
       {open && (
@@ -155,10 +160,11 @@ function ProductListItem({ product, onUpdate, onRemove }) {
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <label className="text-xs font-semibold text-slate-500 mb-1 block">
-              Tên hàng hóa
+              Tên hàng hóa <span className="text-rose-500">*</span>
             </label>
             <input
               value={form.tenSanPham}
+              maxLength={200}
               onChange={(e) => setForm({ ...form, tenSanPham: e.target.value })}
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none transition-all"
             />
@@ -169,52 +175,73 @@ function ProductListItem({ product, onUpdate, onRemove }) {
             </label>
             <input
               value={form.nhomHang || ""}
+              maxLength={50}
               onChange={(e) => setForm({ ...form, nhomHang: e.target.value })}
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none transition-all"
             />
           </div>
+
           <div>
             <label className="text-xs font-semibold text-slate-500 mb-1 block">
-              Mã sản phẩm
+              Đơn vị chẵn <span className="text-rose-500">*</span>
             </label>
             <input
-              value={form.maSanPham || ""}
-              onChange={(e) => setForm({ ...form, maSanPham: e.target.value })}
+              value={form.donViChan || ""}
+              maxLength={20}
+              onChange={(e) => setForm({ ...form, donViChan: e.target.value })}
+              placeholder="Thùng, Hộp..."
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none transition-all"
             />
           </div>
           <div>
             <label className="text-xs font-semibold text-slate-500 mb-1 block">
-              Hạn sử dụng
+              Đơn vị lẻ
             </label>
             <input
-              type="date"
-              value={form.hanSuDung || ""}
-              onChange={(e) => setForm({ ...form, hanSuDung: e.target.value })}
+              value={form.donViLe || ""}
+              maxLength={20}
+              onChange={(e) => setForm({ ...form, donViLe: e.target.value })}
+              placeholder="Chai, Gói..."
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none transition-all"
             />
           </div>
           <div>
             <label className="text-xs font-semibold text-slate-500 mb-1 block">
-              Số lượng
+              Quy đổi <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="number"
+              min="1"
+              value={form.quyDoi}
+              onChange={(e) =>
+                setForm({ ...form, quyDoi: parseInt(e.target.value) || 1 })
+              }
+              placeholder="Ví dụ: 24"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none transition-all"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-500 mb-1 block">
+              Số lượng (chẵn) <span className="text-rose-500">*</span>
             </label>
             <input
               type="number"
               min="1"
               value={form.soLuong}
-              onChange={(e) =>
-                setForm({ ...form, soLuong: parseInt(e.target.value) || 0 })
-              }
+              onChange={(e) => {
+                const val = parseInt(e.target.value) || 0;
+                setForm({ ...form, soLuong: Math.min(val, 100000) });
+              }}
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none transition-all"
             />
           </div>
           <div>
             <label className="text-xs font-semibold text-slate-500 mb-1 block">
-              Giá nhập
+              Giá nhập <span className="text-rose-500">*</span>
             </label>
             <CurrencyInput
-              value={form.giaNhap}
-              onChange={(v) => setForm({ ...form, giaNhap: v })}
+              value={form.giaNhapChan}
+              onChange={(v) => setForm({ ...form, giaNhapChan: v })}
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none transition-all"
             />
           </div>
@@ -233,6 +260,9 @@ function ProductListItem({ product, onUpdate, onRemove }) {
           <button
             type="button"
             onClick={() => {
+              if (Number(form.giaNhapChan || 0) <= 0) {
+                return toast.error("Giá nhập phải lớn hơn 0");
+              }
               onUpdate(form);
               setIsEditing(false);
             }}
@@ -253,54 +283,153 @@ function ProductListItem({ product, onUpdate, onRemove }) {
       <div className="min-w-0 flex-1">
         <p className="font-semibold text-slate-800 leading-tight group-hover:text-rose-700 transition-colors">
           {product.tenSanPham}{" "}
-          <span className="text-slate-400 font-normal">({product.donVi})</span>
+          <span className="text-slate-400 font-normal">
+            ({product.donViChan})
+          </span>
         </p>
         <p className="mt-1 text-xs text-slate-500">
-          Nhóm: {product.nhomHang || "-"}
+          Nhóm: {product.nhomHang || "-"} • Quy đổi: {product.quyDoi}{" "}
+          {product.donViLe}
         </p>
         <p className="mt-1 text-xs text-slate-500">
-          Mã SP: {product.maSanPham || "-"} • HSD: {product.hanSuDung || "-"}
+          Mã SP: {product.maSanPham || "-"}
         </p>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500">
           <span>
             SL:{" "}
-            <strong className="text-slate-700">{fmt(product.soLuong)}</strong>
+            <strong className="text-slate-700">{fmt(product.soLuong)}</strong>{" "}
+            {product.donViChan}
+            {product.donViLe && product.quyDoi > 1 && (
+              <span className="text-xs ml-1 text-slate-400">
+                (= {fmt(product.soLuong * product.quyDoi)} {product.donViLe})
+              </span>
+            )}
           </span>
           <span className="opacity-40">•</span>
           <span>
             Giá:{" "}
-            <strong className="text-slate-700">{fmt(product.giaNhap)}</strong>
+            <strong className="text-slate-700">
+              {fmt(product.giaNhapChan)}
+            </strong>
           </span>
         </div>
       </div>
       <div className="flex items-center justify-between sm:flex-col sm:items-end sm:justify-center shrink-0 border-t border-slate-50 sm:border-0 pt-2 sm:pt-0 mt-1 sm:mt-0">
         <span className="text-xs text-slate-400 sm:hidden">Thành tiền</span>
         <span className="font-bold text-rose-600 tabular-nums">
-          {fmt(product.soLuong * product.giaNhap)}
+          {fmt(product.soLuong * product.giaNhapChan)}
         </span>
       </div>
     </div>
   );
 }
 
+function SupplierInfoSection({
+  receiptInfo,
+  onUpdate,
+  showSupplierSuggestions,
+  onShowSuggestions,
+  onHideSuggestions,
+  supplierSuggestions,
+  onSelectSupplierSuggestion,
+  errors = {},
+}) {
+  const inputCls = (hasError) =>
+    `w-full rounded-xl border ${
+      hasError ? "border-rose-500 ring-1 ring-rose-500/20" : "border-slate-200"
+    } bg-slate-50/50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 transition-all`;
+
+  return (
+    <div className="grid gap-4 sm:col-span-2 sm:grid-cols-2">
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+          Tên nhà cung cấp <span className="text-rose-500">*</span>
+        </label>
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Nhập tên nhà cung cấp"
+            value={receiptInfo.nhaCungCap || ""}
+            maxLength={120}
+            onFocus={onShowSuggestions}
+            onBlur={() => setTimeout(onHideSuggestions, 120)}
+            onChange={(e) => {
+              onUpdate({ ...receiptInfo, nhaCungCap: e.target.value });
+              if (errors.nhaCungCap)
+                onUpdate({ ...receiptInfo, nhaCungCap: e.target.value }); // Trigger re-render if needed, but mostly clear error locally if we had local state
+            }}
+            className={inputCls(!!errors.nhaCungCap)}
+          />
+          {errors.nhaCungCap && (
+            <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+              {errors.nhaCungCap}
+            </p>
+          )}
+          {showSupplierSuggestions && supplierSuggestions.length > 0 && (
+            <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+              {supplierSuggestions.map((s) => (
+                <button
+                  key={`${s.tenNCC}-${s.soDienThoai || ""}`}
+                  type="button"
+                  className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-emerald-50"
+                  onMouseDown={(ev) => ev.preventDefault()}
+                  onClick={() => onSelectSupplierSuggestion(s)}
+                >
+                  <p className="text-sm font-semibold text-slate-800">
+                    {s.tenNCC}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {s.soDienThoai || "-"}
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+          Số điện thoại NCC
+        </label>
+        <input
+          type="tel"
+          placeholder="Nhập số điện thoại"
+          value={receiptInfo.soDienThoai || ""}
+          maxLength={15}
+          onChange={(e) =>
+            onUpdate({
+              ...receiptInfo,
+              soDienThoai: e.target.value.replace(/\D/g, ""),
+            })
+          }
+          className={inputCls(!!errors.soDienThoai)}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function InventoryPage({ user }) {
-  const [productCatalog, setProductCatalog] = useState([]);
+  const [productSuggestions, setProductSuggestions] = useState([]);
+  const [supplierCatalog, setSupplierCatalog] = useState([]);
+  const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
   const [products, setProducts] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showProductSuggestions, setShowProductSuggestions] = useState(false);
   const [isLoadingReceiptDefaults, setIsLoadingReceiptDefaults] =
     useState(true);
+  const [errors, setErrors] = useState({});
 
   const [receiptInfo, setReceiptInfo] = useState(createInitialReceiptInfo);
 
   const [newProduct, setNewProduct] = useState({
-    maSanPham: "",
     tenSanPham: "",
     nhomHang: "",
-    hanSuDung: "",
-    donVi: "",
+    donViChan: "",
+    donViLe: "",
+    quyDoi: 1,
     soLuong: 1,
-    giaNhap: 0,
+    giaNhapChan: 0,
   });
 
   const loadReceiptDefaults = async ({ silent = false } = {}) => {
@@ -331,60 +460,101 @@ export default function InventoryPage({ user }) {
   useEffect(() => {
     loadReceiptDefaults();
 
-    getProductCatalog().then((res) => {
+    getInventorySuggestions().then((res) => {
       if (res?.success && Array.isArray(res.data)) {
-        setProductCatalog(res.data);
+        setProductSuggestions(res.data);
+      }
+    });
+
+    getSupplierCatalog().then((res) => {
+      if (res?.success && Array.isArray(res.data)) {
+        setSupplierCatalog(res.data);
       }
     });
   }, []);
 
-  const applyMatchedProduct = (prev, inputName, matched) => {
-    if (!matched) return { ...prev, tenSanPham: inputName };
+  const supplierSuggestions = supplierCatalog
+    .filter((s) =>
+      foldText(s.tenNCC).includes(foldText(receiptInfo.nhaCungCap)),
+    )
+    .slice(0, 5);
+
+  const applyMatchedProduct = (current, tenSanPham, matched) => {
+    if (!matched) return { ...current, tenSanPham };
     return {
-      ...prev,
-      tenSanPham: matched.tenSanPham || inputName,
-      nhomHang: matched.nhomHang || prev.nhomHang,
-      donVi: matched.donVi || prev.donVi,
-      giaNhap: matched.giaVon || prev.giaNhap, // Gợi ý giá vốn làm giá nhập mặc định
+      ...current,
+      tenSanPham: tenSanPham || matched.tenSanPham || "",
+      nhomHang: matched.nhomHang || "",
+      donViChan: matched.donViChan || "",
+      quyDoi: matched.quyDoi || 1,
+      donViLe: matched.donViLe || matched.donViChan || "",
+      giaNhapChan: Number(matched.giaNhapChan || 0),
+      soLuong: matched.soLuong ? Number(matched.soLuong) : current.soLuong,
     };
   };
 
   const handleAddProduct = () => {
-    const maSanPham = String(newProduct.maSanPham || "").trim();
     const name = newProduct.tenSanPham.trim();
     const group = String(newProduct.nhomHang || "").trim();
-    const hanSuDung = String(newProduct.hanSuDung || "").trim();
-    const unit = newProduct.donVi.trim();
-    const qty = Number(newProduct.soLuong) || 0;
-    const price = Number(newProduct.giaNhap) || 0;
 
-    if (!name) return toast.error("Vui lòng nhập tên sản phẩm");
-    if (!unit) return toast.error("Vui lòng nhập đơn vị");
-    if (qty <= 0) return toast.error("Số lượng phải lớn hơn 0");
-    if (price < 0) return toast.error("Giá nhập không hợp lệ");
+    const donViChan = (newProduct.donViChan || "").trim();
+    const donViLe = (newProduct.donViLe || "").trim();
+    const qtyChan = Number(newProduct.soLuong) || 0;
+    const priceChan = Number(newProduct.giaNhapChan) || 0;
+
+    const newErr = {};
+    if (!name) newErr.new_tenSanPham = "Chưa có tên hàng";
+    if (!donViChan) newErr.new_donViChan = "Cần đơn vị";
+    if (qtyChan <= 0) newErr.new_soLuong = "Sai SL";
+    if (qtyChan > 100000) newErr.new_soLuong = "Tối đa 100k";
+    if (priceChan <= 0) newErr.new_giaNhapChan = "Sai giá";
+
+    const isDuplicate = products.some(
+      (p) =>
+        p.tenSanPham.trim().toLowerCase() === name.toLowerCase() &&
+        p.donViChan.trim().toLowerCase() === donViChan.toLowerCase(),
+    );
+    if (isDuplicate) {
+      newErr.new_tenSanPham = "Hàng này đã có trong phiếu nhập";
+    }
+
+    if (Object.keys(newErr).length > 0) {
+      setErrors((p) => ({ ...p, ...newErr }));
+      return;
+    }
 
     setProducts((prev) => [
       {
         id: Date.now().toString(),
-        maSanPham,
         tenSanPham: name,
         nhomHang: group,
-        hanSuDung,
-        donVi: unit,
-        soLuong: qty,
-        giaNhap: price,
+        donViChan,
+        donViLe,
+        quyDoi: Number(newProduct.quyDoi) || 1,
+        soLuong: qtyChan,
+        giaNhapChan: priceChan,
       },
       ...prev,
     ]);
 
+    setErrors((p) => {
+      const {
+        new_tenSanPham,
+        new_donViChan,
+        new_soLuong,
+        new_giaNhapChan,
+        ...rest
+      } = p;
+      return rest;
+    });
     setNewProduct({
-      maSanPham: "",
       tenSanPham: "",
       nhomHang: "",
-      hanSuDung: "",
-      donVi: "",
+      donViChan: "",
+      donViLe: "",
+      quyDoi: 1,
       soLuong: 1,
-      giaNhap: 0,
+      giaNhapChan: 0,
     });
     toast.success("Đã thêm vào phiếu");
   };
@@ -398,19 +568,33 @@ export default function InventoryPage({ user }) {
   const handleRemoveProduct = (id) => {
     setProducts((prev) => prev.filter((p) => p.id !== id));
   };
-
   const totalAmount = products.reduce(
-    (sum, p) => sum + p.soLuong * p.giaNhap,
+    (sum, p) => sum + p.soLuong * (p.giaNhapChan || 0),
     0,
   );
-  const totalItems = products.reduce((sum, p) => sum + p.soLuong, 0);
+  const totalItems = products.length; // Thay vì sum quantity, đếm số loại mặt hàng
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isLoadingReceiptDefaults)
       return toast.error("Đang tải mã phiếu nhập mới, vui lòng chờ...");
-    if (products.length === 0)
-      return toast.error("Vui lòng thêm sản phẩm vào phiếu nhập");
+
+    const newErr = {};
+    if (!receiptInfo.nhaCungCap?.trim()) {
+      newErr.nhaCungCap = "Vui lòng nhập tên nhà cung cấp";
+    }
+    if (products.length === 0) {
+      toast.error("Vui lòng thêm sản phẩm vào phiếu nhập");
+      return;
+    }
+
+    if (Object.keys(newErr).length > 0) {
+      setErrors(newErr);
+      toast.error("Vui lòng kiểm tra lại thông tin");
+      return;
+    }
+
+    setErrors({});
     if (receiptInfo.trangThai === RECEIPT_STATUS.PARTIAL) {
       const paid = Number(receiptInfo.soTienDaTra || 0);
       if (paid <= 0) return toast.error("Vui lòng nhập số tiền đã trả trước");
@@ -418,47 +602,86 @@ export default function InventoryPage({ user }) {
         return toast.error("Số tiền đã trả không được lớn hơn tổng phiếu nhập");
     }
 
-    setIsSubmitting(true);
-    try {
-      const payload = {
-        receiptInfo: {
-          ...receiptInfo,
-          trangThaiCode: getReceiptStatusCode(receiptInfo.trangThai),
-          soTienDaTra:
-            receiptInfo.trangThai === RECEIPT_STATUS.PARTIAL
-              ? Number(receiptInfo.soTienDaTra || 0)
-              : 0,
-        },
-        products: products.map((p) => ({
-          maSanPham: p.maSanPham || "",
-          tenSanPham: p.tenSanPham,
-          nhomHang: p.nhomHang || "",
-          hanSuDung: p.hanSuDung || "",
-          donVi: p.donVi,
-          soLuong: p.soLuong,
-          giaNhap: p.giaNhap,
-        })),
-        user: user?.email || "Unknown",
-      };
+    // Snapshot for rollback
+    const productsSnapshot = products;
+    const receiptInfoSnapshot = receiptInfo;
 
+    const payload = {
+      receiptInfo: {
+        ...receiptInfo,
+        trangThaiCode: getReceiptStatusCode(receiptInfo.trangThai),
+        soTienDaTra:
+          receiptInfo.trangThai === RECEIPT_STATUS.PARTIAL
+            ? Number(receiptInfo.soTienDaTra || 0)
+            : 0,
+      },
+      products: products.map((p) => ({
+        ...p,
+        donVi: p.donViChan,
+        soLuong: p.soLuong,
+        giaNhap: p.giaNhapChan,
+      })),
+      user: user?.email || "Unknown",
+    };
+
+    // Optimistic UI: clear form immediately
+    setProducts([]);
+    setReceiptInfo(createInitialReceiptInfo());
+
+    setIsSubmitting(true);
+    const toastId = toast.loading("Đang lưu phiếu nhập...", {
+      duration: Infinity,
+    });
+
+    try {
       const res = await createInventoryReceipt(payload);
       if (res?.success) {
-        toast.success("Tạo phiếu nhập kho thành công!");
-        setProducts([]);
-        setReceiptInfo(createInitialReceiptInfo());
-        await loadReceiptDefaults();
+        toast.success(
+          res?.queued
+            ? res.message || "Phiếu nhập đã vào hàng đợi, đang xử lý trong nền."
+            : "Tạo phiếu nhập kho thành công!",
+          { id: toastId, duration: 5000 },
+        );
+        try {
+          if (!res?.queued) formatAllSheets().catch(() => {});
+        } catch (e) {}
+        // Fire-and-forget: reload data in background
+        Promise.all([
+          loadReceiptDefaults(),
+          getInventorySuggestions().then((r) => {
+            if (r?.success && Array.isArray(r.data))
+              setProductSuggestions(r.data);
+          }),
+          getSupplierCatalog().then((r) => {
+            if (r?.success && Array.isArray(r.data)) setSupplierCatalog(r.data);
+          }),
+        ]).catch(() => {});
       } else {
-        toast.error(res?.message || "Tạo phiếu nhập thất bại");
+        // Rollback
+        setProducts(productsSnapshot);
+        setReceiptInfo(receiptInfoSnapshot);
+        toast.error(
+          res?.message || "Tạo phiếu nhập thất bại, đã khôi phục dữ liệu.",
+          { id: toastId, duration: 5000 },
+        );
       }
     } catch (err) {
-      toast.error("Có lỗi xảy ra khi tạo phiếu nhập");
+      // Rollback
+      setProducts(productsSnapshot);
+      setReceiptInfo(receiptInfoSnapshot);
+      toast.error("Có lỗi xảy ra, đã khôi phục dữ liệu phiếu nhập.", {
+        id: toastId,
+        duration: 5000,
+      });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const inputCls =
-    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all";
+  const inputCls = (hasError) =>
+    `w-full rounded-xl border ${
+      hasError ? "border-rose-500 ring-1 ring-rose-500/20" : "border-slate-200"
+    } bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all`;
 
   return (
     <main className="min-h-screen pb-24 bg-gradient-to-br from-slate-50 via-slate-50 to-emerald-50/30">
@@ -467,9 +690,7 @@ export default function InventoryPage({ user }) {
         <div className="mb-8 md:mb-10 animate-[fadeUp_0.4s_ease] max-w-3xl">
           <div className="inline-flex items-center gap-2 mb-4 md:mb-6">
             <div className="w-3 h-3 rounded-full bg-emerald-600" />
-            <span className="text-xs font-bold text-emerald-600 uppercase tracking-widest">
-              Inventory
-            </span>
+            <span className="text-xs font-bold text-emerald-600 uppercase tracking-widest"></span>
           </div>
           <div className="mb-4 md:mb-6">
             <h1 className="text-4xl md:text-5xl font-black text-slate-900 leading-[1.15] md:leading-[1.2] pb-1 md:pb-2">
@@ -498,10 +719,11 @@ export default function InventoryPage({ user }) {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-slate-500">
-                    Mã phiếu
+                    Mã phiếu <span className="text-rose-500">*</span>
                   </label>
                   <input
                     value={receiptInfo.maPhieu}
+                    maxLength={50}
                     onChange={(e) =>
                       setReceiptInfo((prev) => ({
                         ...prev,
@@ -513,12 +735,12 @@ export default function InventoryPage({ user }) {
                         ? "Đang tải mã phiếu..."
                         : "Mã phiếu tự động"
                     }
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
+                    className={inputCls(false)}
                   />
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-slate-500">
-                    Ngày nhập
+                    Ngày nhập <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="date"
@@ -529,28 +751,33 @@ export default function InventoryPage({ user }) {
                         ngayNhap: e.target.value,
                       }))
                     }
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
+                    className={inputCls(false)}
                   />
                 </div>
-                <div className="sm:col-span-2">
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-500">
-                    Mã hóa đơn nhà cung cấp
-                  </label>
-                  <input
-                    value={receiptInfo.nhaCungCap}
-                    onChange={(e) =>
-                      setReceiptInfo((prev) => ({
-                        ...prev,
-                        nhaCungCap: e.target.value,
-                      }))
-                    }
-                    placeholder="Mã hóa đơn NCC (không bắt buộc)"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
-                  />
-                </div>
+                <SupplierInfoSection
+                  receiptInfo={receiptInfo}
+                  onUpdate={setReceiptInfo}
+                  showSupplierSuggestions={showSupplierSuggestions}
+                  onShowSuggestions={() => setShowSupplierSuggestions(true)}
+                  onHideSuggestions={() => setShowSupplierSuggestions(false)}
+                  supplierSuggestions={supplierSuggestions}
+                  onSelectSupplierSuggestion={(s) => {
+                    setReceiptInfo((prev) => ({
+                      ...prev,
+                      nhaCungCap: s.tenNCC,
+                      soDienThoai: s.soDienThoai,
+                    }));
+                    if (errors.nhaCungCap)
+                      setErrors((p) => {
+                        const { nhaCungCap, ...rest } = p;
+                        return rest;
+                      });
+                  }}
+                  errors={errors}
+                />
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-slate-500">
-                    Trạng thái
+                    Trạng thái <span className="text-rose-500">*</span>
                   </label>
                   <ReceiptStatusSelect
                     value={receiptInfo.trangThai}
@@ -586,6 +813,7 @@ export default function InventoryPage({ user }) {
                   </label>
                   <input
                     value={receiptInfo.ghiChu}
+                    maxLength={200}
                     onChange={(e) =>
                       setReceiptInfo((prev) => ({
                         ...prev,
@@ -605,21 +833,19 @@ export default function InventoryPage({ user }) {
                 <h3 className="font-bold text-base md:text-lg text-slate-800 mb-0.5">
                   Thêm mặt hàng nhập
                 </h3>
-                <p className="text-xs text-slate-500">
-                  Sản phẩm sẽ tự điền nhóm hàng và đơn vị theo sheet SAN_PHAM
-                </p>
               </div>
 
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    Tên hàng
+                    Tên hàng <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <input
                       type="text"
                       placeholder="Ví dụ: áo phông trắng, Quần jean..."
                       value={newProduct.tenSanPham}
+                      maxLength={200}
                       onFocus={() => setShowProductSuggestions(true)}
                       onBlur={() => {
                         const titleName = toTitleCase(newProduct.tenSanPham);
@@ -651,95 +877,85 @@ export default function InventoryPage({ user }) {
                       }}
                       onChange={(e) => {
                         const tenSanPham = e.target.value;
-                        const q = tenSanPham
-                          .toLowerCase()
-                          .replace(/[\u0300-\u036f]/g, "")
-                          .trim();
-                        const matched = productCatalog.find(
-                          (p) =>
-                            p.tenSanPham
-                              ?.toLowerCase()
-                              .replace(/[\u0300-\u036f]/g, "")
-                              .trim() === q,
-                        );
-                        setNewProduct((prev) =>
-                          applyMatchedProduct(prev, tenSanPham, matched),
-                        );
+                        setNewProduct((prev) => ({ ...prev, tenSanPham }));
+                        if (errors.new_tenSanPham)
+                          setErrors((p) => {
+                            const { new_tenSanPham, ...rest } = p;
+                            return rest;
+                          });
                       }}
-                      className={inputCls}
+                      className={inputCls(!!errors.new_tenSanPham)}
                     />
+                    {errors.new_tenSanPham && (
+                      <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                        {errors.new_tenSanPham}
+                      </p>
+                    )}
                     {showProductSuggestions &&
-                      productCatalog.filter((p) =>
+                      productSuggestions.filter((p) =>
                         p.tenSanPham
                           .toLowerCase()
                           .includes(newProduct.tenSanPham.toLowerCase()),
                       ).length > 0 && (
-                        <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
-                          {productCatalog
-                            .filter((p) =>
-                              p.tenSanPham
-                                .toLowerCase()
-                                .includes(newProduct.tenSanPham.toLowerCase()),
-                            )
-                            .slice(0, 8)
-                            .map((p) => (
-                              <button
-                                key={`${p.tenSanPham}-${p.donVi}`}
-                                type="button"
-                                className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-emerald-50"
-                                onMouseDown={(ev) => ev.preventDefault()}
-                                onClick={() => {
-                                  setNewProduct((prev) =>
-                                    applyMatchedProduct(
-                                      prev,
-                                      p.tenSanPham || "",
-                                      p,
-                                    ),
-                                  );
-                                  setShowProductSuggestions(false);
-                                }}
-                              >
-                                <p className="text-sm font-semibold text-slate-800">
-                                  {p.tenSanPham}
-                                </p>
-                                <p className="text-xs text-slate-500">
-                                  {p.nhomHang || "Chưa phân nhóm"} •{" "}
-                                  {p.donVi || "-"} • Vốn HT:{" "}
-                                  {fmt(p.giaVon || 0)}
-                                </p>
-                              </button>
-                            ))}
+                        <div className="absolute top-full left-0 right-0 z-[60] mt-2 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
+                          <div className="max-h-[300px] overflow-y-auto scrollbar-thin overflow-x-hidden p-2 space-y-1">
+                            {productSuggestions
+                              .filter((p) =>
+                                p.tenSanPham
+                                  .toLowerCase()
+                                  .includes(
+                                    newProduct.tenSanPham.toLowerCase(),
+                                  ),
+                              )
+                              .slice(0, 8)
+                              .map((p, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  className="w-full text-left p-3 rounded-xl hover:bg-slate-50 transition-colors duration-200 group"
+                                  onClick={() => {
+                                    setNewProduct((prev) =>
+                                      applyMatchedProduct(
+                                        prev,
+                                        prev.tenSanPham,
+                                        p,
+                                      ),
+                                    );
+                                    setShowProductSuggestions(false);
+                                  }}
+                                >
+                                  <div className="flex justify-between items-start gap-3">
+                                    <div className="flex-1 min-w-0">
+                                      <h4 className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors truncate">
+                                        {p.tenSanPham}
+                                      </h4>
+                                      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
+                                        {p.nhomHang && (
+                                          <span className="text-[10px] font-medium text-slate-500 flex items-center gap-1 uppercase tracking-wider">
+                                            <i className="ri-folder-line opacity-70" />
+                                            {p.nhomHang}
+                                          </span>
+                                        )}
+                                        <span className="text-[10px] font-medium text-blue-600 flex items-center gap-1 uppercase tracking-wider">
+                                          <i className="ri-scales-line opacity-70" />
+                                          {p.donViChan}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div className="text-right flex-shrink-0">
+                                      <div className="text-[11px] font-bold text-slate-700">
+                                        {fmt(p.giaNhapChan)}
+                                      </div>
+                                      <div className="text-[9px] text-slate-400 font-medium">
+                                        Vốn ({p.donViChan})
+                                      </div>
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
+                          </div>
                         </div>
                       )}
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3 md:gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      Mã sản phẩm
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ví dụ: SP001"
-                      value={newProduct.maSanPham}
-                      onChange={(e) =>
-                        setNewProduct({ ...newProduct, maSanPham: e.target.value })
-                      }
-                      className={inputCls}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      Hạn sử dụng
-                    </label>
-                    <input
-                      type="date"
-                      value={newProduct.hanSuDung}
-                      onChange={(e) =>
-                        setNewProduct({ ...newProduct, hanSuDung: e.target.value })
-                      }
-                      className={inputCls}
-                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3 md:gap-4">
@@ -749,80 +965,160 @@ export default function InventoryPage({ user }) {
                     </label>
                     <input
                       type="text"
-                      placeholder="Đồ uống, thực phẩm..."
+                      placeholder="Nước, Bánh kẹo..."
                       value={newProduct.nhomHang}
-                      onChange={(e) =>
-                        setNewProduct({ ...newProduct, nhomHang: e.target.value })
-                      }
-                      onBlur={() =>
-                        setNewProduct((prev) => ({
-                          ...prev,
-                          nhomHang: toTitleCase(prev.nhomHang),
-                        }))
-                      }
-                      className={inputCls}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      Đơn vị
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="cái, bộ..."
-                      value={newProduct.donVi}
-                      onChange={(e) =>
-                        setNewProduct({ ...newProduct, donVi: e.target.value })
-                      }
-                      onBlur={() =>
-                        setNewProduct((prev) => ({
-                          ...prev,
-                          donVi: toTitleCase(prev.donVi),
-                        }))
-                      }
-                      className={inputCls}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3 md:gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      Số lượng nhập
-                    </label>
-                    <input
-                      type="number"
-                      placeholder="1"
-                      min="0"
-                      value={newProduct.soLuong}
+                      maxLength={50}
                       onChange={(e) =>
                         setNewProduct({
                           ...newProduct,
-                          soLuong:
+                          nhomHang: e.target.value,
+                        })
+                      }
+                      className={inputCls(false)}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Đơn vị chẵn <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Thùng, Hộp..."
+                      value={newProduct.donViChan}
+                      maxLength={20}
+                      onChange={(e) => {
+                        setNewProduct({
+                          ...newProduct,
+                          donViChan: e.target.value,
+                        });
+                        if (errors.new_donViChan)
+                          setErrors((p) => {
+                            const { new_donViChan, ...rest } = p;
+                            return rest;
+                          });
+                      }}
+                      className={inputCls(!!errors.new_donViChan)}
+                    />
+                    {errors.new_donViChan && (
+                      <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                        {errors.new_donViChan}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Đơn vị lẻ
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Chai, Gói..."
+                      value={newProduct.donViLe}
+                      maxLength={20}
+                      onChange={(e) =>
+                        setNewProduct({
+                          ...newProduct,
+                          donViLe: e.target.value,
+                        })
+                      }
+                      className={inputCls(false)}
+                    />
+                  </div>
+                  <div className="col-span-2 lg:col-span-1">
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Quy đổi <span className="text-rose-500">*</span> (
+                      {newProduct.donViChan || "Chẵn"} →{" "}
+                      {newProduct.donViLe || "Lẻ"})
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="24"
+                      value={newProduct.quyDoi}
+                      onChange={(e) =>
+                        setNewProduct({
+                          ...newProduct,
+                          quyDoi:
                             e.target.value === ""
                               ? ""
                               : parseInt(e.target.value, 10) || 0,
                         })
                       }
                       onBlur={() => {
-                        if (newProduct.soLuong === "" || newProduct.soLuong < 1)
-                          setNewProduct((prev) => ({ ...prev, soLuong: 1 }));
+                        if (newProduct.quyDoi === "" || newProduct.quyDoi < 1)
+                          setNewProduct((prev) => ({ ...prev, quyDoi: 1 }));
                       }}
-                      className={inputCls}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      Giá nhập (Giá vốn mới)
-                    </label>
-                    <CurrencyInput
-                      value={newProduct.giaNhap}
-                      onChange={(v) =>
-                        setNewProduct({ ...newProduct, giaNhap: v })
-                      }
-                      className={inputCls}
+                      className={inputCls(false)}
                     />
                   </div>
                 </div>
+
+                <div className="grid grid-cols-2 gap-3 md:gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Số lượng ({newProduct.donViChan || "chẵn"}){" "}
+                      <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="1"
+                      min="1"
+                      value={newProduct.soLuong}
+                      onChange={(e) => {
+                        const val =
+                          e.target.value === ""
+                            ? ""
+                            : parseInt(e.target.value, 10) || 0;
+                        setNewProduct({
+                          ...newProduct,
+                          soLuong: val === "" ? "" : Math.min(val, 100000),
+                        });
+                        if (errors.new_soLuong)
+                          setErrors((p) => {
+                            const { new_soLuong, ...rest } = p;
+                            return rest;
+                          });
+                      }}
+                      onBlur={() => {
+                        if (newProduct.soLuong === "" || newProduct.soLuong < 1)
+                          setNewProduct((prev) => ({ ...prev, soLuong: 1 }));
+                      }}
+                      className={inputCls(!!errors.new_soLuong)}
+                    />
+                    {errors.new_soLuong && (
+                      <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                        {errors.new_soLuong}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Giá nhập ({newProduct.donViChan || "chẵn"}){" "}
+                      <span className="text-rose-500">*</span>
+                    </label>
+                    <CurrencyInput
+                      value={newProduct.giaNhapChan}
+                      maxLength={20}
+                      onChange={(v) => {
+                        setNewProduct({ ...newProduct, giaNhapChan: v });
+                        if (errors.new_giaNhapChan)
+                          setErrors((p) => {
+                            const { new_giaNhapChan, ...rest } = p;
+                            return rest;
+                          });
+                      }}
+                      className={inputCls(!!errors.new_giaNhapChan)}
+                    />
+                    {errors.new_giaNhapChan && (
+                      <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                        {errors.new_giaNhapChan}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
                 <button
                   type="button"
                   onClick={handleAddProduct}
@@ -842,10 +1138,10 @@ export default function InventoryPage({ user }) {
                       Thông tin phiếu
                     </h2>
                     <p className="text-xs md:text-sm text-slate-500 mt-1">
-                      Hàng hóa đang chuẩn bị nhập
+                      Mặt hàng đang chờ nhập
                     </p>
                   </div>
-                  <div className="flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-xl bg-emerald-600/10 text-emerald-700 font-semibold">
+                  <div className="flex items-center justify-center min-w-[40px] px-2 h-10 md:h-12 rounded-xl bg-emerald-100 text-emerald-700 font-bold shadow-sm">
                     {totalItems}
                   </div>
                 </div>

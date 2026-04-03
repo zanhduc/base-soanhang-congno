@@ -5,6 +5,7 @@ import {
   deleteProductCatalogItem,
   getProductCatalog,
   updateProductCatalogItem,
+  formatAllSheets,
 } from "../api";
 
 const toNum = (v) => Number(String(v ?? "").replace(/[^\d.-]/g, "")) || 0;
@@ -18,7 +19,7 @@ const foldText = (v) =>
     .replace(/đ/g, "d")
     .trim();
 
-function MoneyInput({ value, onChange, placeholder, className = "" }) {
+function MoneyInput({ value, onChange, placeholder, className = "", maxLength }) {
   const [display, setDisplay] = useState(value ? fmt(value) : "");
 
   useEffect(() => {
@@ -36,6 +37,7 @@ function MoneyInput({ value, onChange, placeholder, className = "" }) {
       }}
       inputMode="numeric"
       placeholder={placeholder}
+      maxLength={maxLength}
       className={`w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 pt-2 pb-1.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all ${className}`}
     />
   );
@@ -48,24 +50,36 @@ function LabeledMoneyInput({
   onChange,
   placeholder,
   className = "",
+  error = "",
+  required = false,
+  maxLength,
 }) {
   const toneCls =
     tone === "emerald"
       ? "border-emerald-200 bg-emerald-50/60 text-emerald-800"
       : "border-rose-200 bg-rose-50/60 text-rose-800";
+
+  const errCls = error ? "border-rose-500 ring-1 ring-rose-500/20" : toneCls;
+
   return (
-    <div
-      className={`h-11 rounded-xl border px-2.5 py-1.5 ${toneCls} grid grid-cols-[auto,1fr] items-stretch gap-2 ${className}`}
-    >
-      <span className="inline-flex self-center pt-0.5 min-w-[84px] items-center justify-start text-[11px] font-bold uppercase tracking-wide leading-none whitespace-nowrap">
-        {label}
-      </span>
-      <MoneyInput
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        className="h-full py-0.5 leading-none bg-white"
-      />
+    <div className="space-y-1">
+      <div
+        className={`h-11 rounded-xl border px-2.5 py-1.5 ${errCls} grid grid-cols-[auto,1fr] items-stretch gap-2 ${className}`}
+      >
+        <span className="inline-flex self-center pt-0.5 min-w-[84px] items-center justify-start text-[11px] font-bold uppercase tracking-wide leading-none whitespace-nowrap">
+          {label} {required && <span className="text-rose-500 ml-0.5">*</span>}
+        </span>
+        <MoneyInput
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          maxLength={maxLength}
+          className="h-full py-0.5 leading-none bg-white"
+        />
+      </div>
+      {error && (
+        <p className="px-1 text-[10px] font-semibold text-rose-600">{error}</p>
+      )}
     </div>
   );
 }
@@ -76,20 +90,32 @@ function LabeledTextInput({
   onChange,
   placeholder,
   className = "",
+  error = "",
+  required = false,
+  maxLength,
 }) {
+  const normalCls = "border-slate-200 bg-slate-50/60";
+  const errCls = error ? "border-rose-500 ring-1 ring-rose-500/20" : normalCls;
+
   return (
-    <div
-      className={`h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-2.5 py-1.5 grid grid-cols-[auto,1fr] items-stretch gap-2 text-slate-700 ${className}`}
-    >
-      <span className="inline-flex self-center pt-0.5 min-w-[84px] items-center justify-start text-[11px] font-bold uppercase tracking-wide leading-none whitespace-nowrap text-slate-500">
-        {label}
-      </span>
-      <input
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        className="w-full h-full rounded-xl border border-slate-200 bg-white px-3 pt-2 pb-1.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
-      />
+    <div className="space-y-1">
+      <div
+        className={`h-11 rounded-xl border px-2.5 py-1.5 grid grid-cols-[auto,1fr] items-stretch gap-2 text-slate-700 ${errCls} ${className}`}
+      >
+        <span className="inline-flex self-center pt-0.5 min-w-[84px] items-center justify-start text-[11px] font-bold uppercase tracking-wide leading-none whitespace-nowrap text-slate-500">
+          {label} {required && <span className="text-rose-500 ml-0.5">*</span>}
+        </span>
+        <input
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          maxLength={maxLength}
+          className="h-full py-0.5 leading-none bg-white outline-none w-full border-0 focus:ring-0 px-2 rounded-lg"
+        />
+      </div>
+      {error && (
+        <p className="px-1 text-[10px] font-semibold text-rose-600">{error}</p>
+      )}
     </div>
   );
 }
@@ -114,6 +140,7 @@ export default function ProductsPage() {
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState("");
   const [rows, setRows] = useState([]);
+  const [errorsMap, setErrorsMap] = useState({});
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const loadProducts = async () => {
@@ -148,9 +175,20 @@ export default function ProductsPage() {
 
   const patchRow = (id, patch) => {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+    setErrorsMap((prev) => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      const rowErr = { ...next[id] };
+      Object.keys(patch).forEach((key) => delete rowErr[key]);
+      next[id] = rowErr;
+      return next;
+    });
   };
 
   const addProductDraft = () => {
+    if (rows.some((r) => r.isNew)) {
+      return toast.error("Vui lòng lưu hoặc xóa sản phẩm mới hiện tại trước");
+    }
     const id = `new-${Date.now()}`;
     setRows((prev) => [
       {
@@ -193,14 +231,17 @@ export default function ProductsPage() {
     const tenSanPham = String(row.tenSanPham || "").trim();
     const nhomHang = String(row.nhomHang || "").trim();
     const donVi = String(row.donVi || "").trim();
-    const donGiaBan = Math.max(toNum(row.donGiaBan), 0);
-    const giaVon = Math.max(toNum(row.giaVon), 0);
+    const donGiaBan = toNum(row.donGiaBan);
+    const giaVon = toNum(row.giaVon);
 
-    if (!tenSanPham)
-      return { ok: false, message: "Tên sản phẩm không được để trống" };
-    if (!donVi) return { ok: false, message: "Đơn vị không được để trống" };
-    if (donGiaBan <= 0)
-      return { ok: false, message: "Đơn giá bán phải lớn hơn 0" };
+    const err = {};
+    if (!tenSanPham) err.tenSanPham = "Chưa có tên";
+    if (!donVi) err.donVi = "Cần đơn vị";
+    if (donGiaBan <= 0) err.donGiaBan = "Sai giá";
+    if (giaVon <= 0) err.giaVon = "Sai giá";
+
+    if (Object.keys(err).length > 0) return { ok: false, errors: err };
+
     return {
       ok: true,
       data: { tenSanPham, nhomHang, donVi, donGiaBan, giaVon },
@@ -209,10 +250,59 @@ export default function ProductsPage() {
 
   const handleSaveRow = async (row) => {
     const validated = validateRow(row);
-    if (!validated.ok) return toast.error(validated.message);
+    if (!validated.ok) {
+      setErrorsMap((prev) => ({ ...prev, [row.id]: validated.errors }));
+      return toast.error("Vui lòng kiểm tra lại thông tin");
+    }
     const data = validated.data;
 
+    // Snapshot for rollback
+    const rowsSnapshot = rows;
+    const openIdSnapshot = openId;
+
+    // Optimistic UI: update row in list + close editor
+    if (row.isNew) {
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === row.id
+            ? {
+                ...r,
+                ...data,
+                isNew: false,
+                originalTenSanPham: data.tenSanPham,
+                originalNhomHang: data.nhomHang,
+                originalDonVi: data.donVi,
+              }
+            : r,
+        ),
+      );
+    } else {
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === row.id
+            ? {
+                ...r,
+                ...data,
+                originalTenSanPham: data.tenSanPham,
+                originalNhomHang: data.nhomHang,
+                originalDonVi: data.donVi,
+              }
+            : r,
+        ),
+      );
+    }
+    setOpenId("");
+    setErrorsMap((prev) => {
+      const next = { ...prev };
+      delete next[row.id];
+      return next;
+    });
+
     setSavingKey(row.id);
+    const toastId = toast.loading("Đang lưu sản phẩm...", {
+      duration: Infinity,
+    });
+
     try {
       let res;
       if (row.isNew) {
@@ -226,15 +316,33 @@ export default function ProductsPage() {
       }
 
       if (!res?.success) {
-        toast.error(res?.message || "Lưu sản phẩm thất bại");
+        // Rollback
+        setRows(rowsSnapshot);
+        setOpenId(openIdSnapshot);
+        toast.error(res?.message || "Lưu sản phẩm thất bại, đã khôi phục.", {
+          id: toastId,
+          duration: 5000,
+        });
         return;
       }
 
-      toast.success(res.message || "Đã lưu sản phẩm");
-      await loadProducts();
-      setOpenId("");
+      toast.success(res.message || "Đã lưu sản phẩm", {
+        id: toastId,
+        duration: 5000,
+      });
+      try {
+        formatAllSheets().catch(() => {});
+      } catch (e) {}
+      // Fire-and-forget: sync real data
+      loadProducts().catch(() => {});
     } catch (e) {
-      toast.error("Lưu sản phẩm thất bại");
+      // Rollback
+      setRows(rowsSnapshot);
+      setOpenId(openIdSnapshot);
+      toast.error("Lưu sản phẩm thất bại, đã khôi phục.", {
+        id: toastId,
+        duration: 5000,
+      });
     } finally {
       setSavingKey("");
     }
@@ -251,22 +359,53 @@ export default function ProductsPage() {
   const confirmDeleteRow = async () => {
     const row = deleteTarget;
     if (!row) return;
+
+    // Snapshot for rollback
+    const rowsSnapshot = rows;
+    const openIdSnapshot = openId;
+
+    // Optimistic UI: remove from list immediately
+    setRows((prev) => prev.filter((r) => r.id !== row.id));
+    setOpenId("");
+    setDeleteTarget(null);
+
     setDeletingKey(row.id);
+    const toastId = toast.loading("Đang xóa sản phẩm...", {
+      duration: Infinity,
+    });
+
     try {
       const res = await deleteProductCatalogItem({
         tenSanPham: row.originalTenSanPham || row.tenSanPham,
         donVi: row.originalDonVi || row.donVi,
       });
       if (!res?.success) {
-        toast.error(res?.message || "Xóa sản phẩm thất bại");
+        // Rollback
+        setRows(rowsSnapshot);
+        setOpenId(openIdSnapshot);
+        toast.error(res?.message || "Xóa sản phẩm thất bại, đã khôi phục.", {
+          id: toastId,
+          duration: 5000,
+        });
         return;
       }
-      toast.success(res.message || "Đã xóa sản phẩm");
-      await loadProducts();
-      setOpenId("");
-      setDeleteTarget(null);
+      toast.success(res.message || "Đã xóa sản phẩm", {
+        id: toastId,
+        duration: 5000,
+      });
+      try {
+        formatAllSheets().catch(() => {});
+      } catch (e) {}
+      // Fire-and-forget: sync real data
+      loadProducts().catch(() => {});
     } catch (e) {
-      toast.error("Xóa sản phẩm thất bại");
+      // Rollback
+      setRows(rowsSnapshot);
+      setOpenId(openIdSnapshot);
+      toast.error("Xóa sản phẩm thất bại, đã khôi phục.", {
+        id: toastId,
+        duration: 5000,
+      });
     } finally {
       setDeletingKey("");
     }
@@ -347,7 +486,13 @@ export default function ProductsPage() {
                       <p className="text-xs text-slate-500 truncate leading-tight">
                         {row.nhomHang ? `${row.nhomHang} • ` : ""}
                         {row.donVi || "-"}
-                        {showInventory && ` • Tồn kho: ${row.tonKho || 0}`}
+                        {showInventory && row.tonKho !== undefined && (
+                          <span
+                            className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold ${toNum(row.tonKho) <= 0 ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-600"}`}
+                          >
+                            Tồn: {row.tonKho}
+                          </span>
+                        )}
                       </p>
                     </div>
                     <span
@@ -374,20 +519,23 @@ export default function ProductsPage() {
 
                   {open && (
                     <div className="border-t border-rose-100 bg-rose-50/30 p-4 space-y-3">
-                      <div className="grid gap-2 md:gap-3 md:grid-cols-2 lg:grid-cols-6">
+                      <div className="grid gap-2 md:gap-3 md:grid-cols-2 lg:grid-cols-3">
                         <LabeledTextInput
-                          className="lg:col-span-3"
+                          className="lg:col-span-2"
                           label="Tên sp"
                           value={row.tenSanPham}
+                          required
+                          maxLength={200}
                           onChange={(e) =>
                             patchRow(row.id, { tenSanPham: e.target.value })
                           }
                           placeholder="Tên sản phẩm"
+                          error={errorsMap[row.id]?.tenSanPham}
                         />
                         <LabeledTextInput
-                          className="lg:col-span-3"
                           label="Nhóm hàng"
                           value={row.nhomHang}
+                          maxLength={50}
                           onChange={(e) =>
                             patchRow(row.id, { nhomHang: e.target.value })
                           }
@@ -401,6 +549,7 @@ export default function ProductsPage() {
                             patchRow(row.id, { donVi: e.target.value })
                           }
                           placeholder="Đơn vị"
+                          error={errorsMap[row.id]?.donVi}
                         />
                         <LabeledMoneyInput
                           className="lg:col-span-2"
@@ -409,6 +558,7 @@ export default function ProductsPage() {
                           value={row.donGiaBan}
                           onChange={(v) => patchRow(row.id, { donGiaBan: v })}
                           placeholder="Đơn giá bán"
+                          error={errorsMap[row.id]?.donGiaBan}
                         />
                         <LabeledMoneyInput
                           className="lg:col-span-2"

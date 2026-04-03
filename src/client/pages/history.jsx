@@ -7,171 +7,26 @@ import {
   getOrderHistory,
   getProductCatalog,
   updateOrder,
+  getReceiptHistory,
+  formatAllSheets,
 } from "../api";
 import toast from "react-hot-toast";
 import { buildVietQrUrl } from "../utils/vietqr";
-
-const fmt = (n) => Number(n || 0).toLocaleString();
-const toNum = (v) => Number(String(v ?? "").replace(/[^\d.-]/g, "")) || 0;
-
-const foldText = (v) =>
-  String(v || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .trim();
-
-const isGuestCustomer = (name) => foldText(name) === "khach ghe tham";
-
-const getStatusCode = (status) => {
-  const key = foldText(status).replace(/\s+/g, " ");
-  if (!key) return "PAID";
-  if (key.includes("tra mot phan") || key.includes("tra 1 phan"))
-    return "PARTIAL";
-  if (key === "no" || key.includes(" no ")) return "DEBT";
-  if (key.includes("da thanh toan")) return "PAID";
-  return "PAID";
-};
-
-const toIsoDate = (v) => {
-  const raw = String(v || "").trim();
-  if (!raw) return "";
-  const m = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  return "";
-};
-
-const pad2 = (n) => String(n).padStart(2, "0");
-
-const parseFlexibleDateParts = (value) => {
-  const raw = String(value || "").trim();
-  if (!raw) return null;
-
-  let m = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (m)
-    return { d: Number(m[3]), m: Number(m[2]), y: Number(m[1]), hasYear: true };
-
-  m = raw.match(/^(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?$/);
-  if (m) {
-    const d = Number(m[1]);
-    const mo = Number(m[2]);
-    const yRaw = m[3];
-    if (!yRaw) return { d, m: mo, y: null, hasYear: false };
-    const y = yRaw.length === 2 ? Number(`20${yRaw}`) : Number(yRaw);
-    return { d, m: mo, y, hasYear: true };
-  }
-
-  const digits = raw.replace(/\D/g, "");
-  if (/^\d+$/.test(raw)) {
-    if (digits.length === 8) {
-      if (Number(digits.slice(0, 4)) >= 1900) {
-        return {
-          d: Number(digits.slice(6, 8)),
-          m: Number(digits.slice(4, 6)),
-          y: Number(digits.slice(0, 4)),
-          hasYear: true,
-        };
-      }
-      return {
-        d: Number(digits.slice(0, 2)),
-        m: Number(digits.slice(2, 4)),
-        y: Number(digits.slice(4, 8)),
-        hasYear: true,
-      };
-    }
-    if (digits.length === 6) {
-      return {
-        d: Number(digits.slice(0, 2)),
-        m: Number(digits.slice(2, 4)),
-        y: Number(`20${digits.slice(4, 6)}`),
-        hasYear: true,
-      };
-    }
-    if (digits.length === 4) {
-      return {
-        d: Number(digits.slice(0, 2)),
-        m: Number(digits.slice(2, 4)),
-        y: null,
-        hasYear: false,
-      };
-    }
-  }
-
-  return null;
-};
-
-const isValidCalendarDate = (parts) => {
-  if (!parts) return false;
-  const d = Number(parts.d);
-  const m = Number(parts.m);
-  if (!d || !m || m < 1 || m > 12 || d < 1 || d > 31) return false;
-  if (!parts.hasYear || !parts.y) return true;
-  const dt = new Date(parts.y, m - 1, d);
-  return (
-    dt.getFullYear() === parts.y &&
-    dt.getMonth() === m - 1 &&
-    dt.getDate() === d
-  );
-};
-
-const buildDateTokens = (parts) => {
-  if (!parts || !isValidCalendarDate(parts)) return new Set();
-  const d = pad2(parts.d);
-  const m = pad2(parts.m);
-  const tokens = new Set([`${d}/${m}`, `${d}-${m}`, `${d}${m}`]);
-  if (!parts.hasYear || !parts.y) return tokens;
-  const y = String(parts.y);
-  const yy = y.slice(-2);
-  tokens.add(`${d}/${m}/${y}`);
-  tokens.add(`${d}-${m}-${y}`);
-  tokens.add(`${d}/${m}/${yy}`);
-  tokens.add(`${d}-${m}-${yy}`);
-  tokens.add(`${y}-${m}-${d}`);
-  tokens.add(`${y}${m}${d}`);
-  tokens.add(`${d}${m}${y}`);
-  tokens.add(`${d}${m}${yy}`);
-  return tokens;
-};
-
-const getDateSearchMeta = (queryValue) => {
-  const raw = String(queryValue || "").trim();
-  const looksLikeDate = /[\/\-.]/.test(raw) || /^\d{4,8}$/.test(raw);
-  if (!raw || !looksLikeDate) {
-    return { isDateQuery: false, isValid: true, tokens: new Set() };
-  }
-  const parts = parseFlexibleDateParts(raw);
-  const valid = isValidCalendarDate(parts);
-  return {
-    isDateQuery: true,
-    isValid: valid,
-    tokens: valid ? buildDateTokens(parts) : new Set(),
-  };
-};
-
-const hasDateTokenMatch = (orderDateValue, queryTokens) => {
-  if (!queryTokens || !queryTokens.size) return true;
-  const parts = parseFlexibleDateParts(orderDateValue);
-  const tokens = buildDateTokens(parts);
-  if (!tokens.size) return false;
-  for (const token of queryTokens) {
-    if (tokens.has(token)) return true;
-  }
-  return false;
-};
-
-const moneyMeaning = (value) => {
-  const n = toNum(value);
-  if (!n) return "0 đồng";
-  if (n >= 1_000_000) {
-    return `${(n / 1_000_000).toLocaleString("vi-VN", { maximumFractionDigits: 2 })} triệu`;
-  }
-  if (n >= 1_000) {
-    return `${(n / 1_000).toLocaleString("vi-VN", { maximumFractionDigits: 2 })} nghìn`;
-  }
-  return `${n.toLocaleString("vi-VN")} đồng`;
-};
+import {
+  formatMoney as fmt,
+  parseNumber as toNum,
+  normalizeText as foldText,
+  isGuestCustomer,
+  getStatusCode,
+  toIsoDate,
+  pad2,
+  parseFlexibleDateParts,
+  isValidCalendarDate,
+  buildDateTokens,
+  getDateSearchMeta,
+  hasDateTokenMatch,
+  moneyMeaning,
+} from "../../core/core";
 
 const openReceiptPage = (order, size) => {
   const maPhieu = String(order?.maPhieu || "").trim();
@@ -247,7 +102,7 @@ const writeCachedBankConfig = (config) => {
   }
 };
 
-function MoneyInput({ value, onChange, placeholder }) {
+function MoneyInput({ value, onChange, placeholder, className = "" }) {
   const [display, setDisplay] = useState(value ? fmt(value) : "");
 
   useEffect(() => {
@@ -267,7 +122,9 @@ function MoneyInput({ value, onChange, placeholder }) {
       onChange={onInput}
       placeholder={placeholder}
       inputMode="numeric"
-      className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+      className={
+        className || "rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+      }
     />
   );
 }
@@ -617,6 +474,7 @@ function EditOrderModal({
       donGiaBan: toNum(p.donGiaBan),
     })),
   }));
+  const [errors, setErrors] = useState({});
   const [suggestIndex, setSuggestIndex] = useState(-1);
   const [showCustomerSuggest, setShowCustomerSuggest] = useState(false);
 
@@ -628,6 +486,33 @@ function EditOrderModal({
       ),
     [form.products],
   );
+
+  const validate = () => {
+    const err = {};
+    if (!form.maPhieu?.trim()) err.maPhieu = "Cần mã phiếu";
+    if (!form.ngayBan) err.ngayBan = "Cần ngày";
+
+    const validProducts = form.products.filter(
+      (p) => p.tenSanPham?.trim() && p.donGiaBan > 0,
+    );
+    if (validProducts.length === 0) {
+      err.products = "Cần ít nhất 1 SP hợp lệ";
+    }
+
+    if (form.trangThaiCode === "PARTIAL") {
+      if (!form.soTienDaTra || form.soTienDaTra <= 0)
+        err.soTienDaTra = "Nhập tiền trả";
+      else if (form.soTienDaTra > total) err.soTienDaTra = "Lớn hơn tổng";
+    }
+
+    setErrors(err);
+    return Object.keys(err).length === 0;
+  };
+
+  const inputCls = (hasError) =>
+    `w-full rounded-xl border ${
+      hasError ? "border-rose-500 ring-1 ring-rose-500/20" : "border-slate-200"
+    } px-3 py-2.5 text-sm focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all`;
 
   const updateProduct = (idx, patch) => {
     setForm((prev) => ({
@@ -695,23 +580,48 @@ function EditOrderModal({
 
         <div className="p-4 md:p-5 space-y-4">
           <div className="grid gap-3 md:grid-cols-2">
-            <input
-              value={form.maPhieu}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, maPhieu: e.target.value }))
-              }
-              placeholder="Mã phiếu"
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
-            />
-            <input
-              type="date"
-              lang="en-GB"
-              value={form.ngayBan}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, ngayBan: e.target.value }))
-              }
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
-            />
+            <div>
+              <input
+                value={form.maPhieu}
+                onChange={(e) => {
+                  setForm((p) => ({ ...p, maPhieu: e.target.value }));
+                  if (errors.maPhieu)
+                    setErrors((prev) => {
+                      const { maPhieu, ...rest } = prev;
+                      return rest;
+                    });
+                }}
+                placeholder="Mã phiếu"
+                className={inputCls(!!errors.maPhieu)}
+                readOnly
+              />
+              {errors.maPhieu && (
+                <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                  {errors.maPhieu}
+                </p>
+              )}
+            </div>
+            <div>
+              <input
+                type="date"
+                lang="en-GB"
+                value={form.ngayBan}
+                onChange={(e) => {
+                  setForm((p) => ({ ...p, ngayBan: e.target.value }));
+                  if (errors.ngayBan)
+                    setErrors((prev) => {
+                      const { ngayBan, ...rest } = prev;
+                      return rest;
+                    });
+                }}
+                className={inputCls(!!errors.ngayBan)}
+              />
+              {errors.ngayBan && (
+                <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                  {errors.ngayBan}
+                </p>
+              )}
+            </div>
             <div className="relative">
               <input
                 value={form.tenKhach}
@@ -791,13 +701,25 @@ function EditOrderModal({
               </button>
             ))}
           </div>
-          {form.trangThaiCode === "PARTIAL" && (
+          {(form.trangThaiCode === "PARTIAL" || form.trangThaiCode === "DEBT") && (
             <div className="space-y-1">
               <MoneyInput
                 value={form.soTienDaTra}
-                onChange={(v) => setForm((p) => ({ ...p, soTienDaTra: v }))}
+                onChange={(v) => {
+                  setForm((p) => ({ ...p, soTienDaTra: v }));
+                  if (errors.soTienDaTra)
+                    setErrors((prev) => {
+                      const { soTienDaTra, ...rest } = prev;
+                      return rest;
+                    });
+                }}
                 placeholder="Số tiền đã trả trước"
               />
+              {errors.soTienDaTra && (
+                <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                  {errors.soTienDaTra}
+                </p>
+              )}
               <p className="text-xs font-semibold text-slate-700">
                 Tiền đã trả:{" "}
                 <span className="text-rose-700">
@@ -830,9 +752,15 @@ function EditOrderModal({
                       onChange={(e) => {
                         updateProduct(idx, { tenSanPham: e.target.value });
                         setSuggestIndex(idx);
+                        if (errors.products)
+                          setErrors((prev) => {
+                            const { products, ...rest } = prev;
+                            return rest;
+                          });
                       }}
                       placeholder="Tên sản phẩm"
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      className={inputCls(errors.products && !p.tenSanPham)}
+                      readOnly
                     />
                     {suggestIndex === idx &&
                       getSuggestions(p.tenSanPham).length > 0 && (
@@ -872,23 +800,33 @@ function EditOrderModal({
                     }
                     placeholder="Đơn vị"
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    readOnly
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <input
                     value={p.soLuong}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const val = toNum(e.target.value) || 1;
                       updateProduct(idx, {
-                        soLuong: toNum(e.target.value) || 1,
-                      })
-                    }
+                        soLuong: Math.min(val, 100000),
+                      });
+                    }}
                     placeholder="SL"
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    className={inputCls(false)}
                   />
                   <MoneyInput
                     value={p.donGiaBan}
-                    onChange={(v) => updateProduct(idx, { donGiaBan: v })}
+                    onChange={(v) => {
+                      updateProduct(idx, { donGiaBan: v });
+                      if (errors.products)
+                        setErrors((prev) => {
+                          const { products, ...rest } = prev;
+                          return rest;
+                        });
+                    }}
                     placeholder="Đơn giá bán"
+                    className={inputCls(errors.products && p.donGiaBan <= 0)}
                   />
                 </div>
                 <div className="flex items-center justify-between">
@@ -907,7 +845,7 @@ function EditOrderModal({
             ))}
             <button
               type="button"
-              onClick={() =>
+              onClick={() => {
                 setForm((p) => ({
                   ...p,
                   products: [
@@ -921,11 +859,21 @@ function EditOrderModal({
                       donGiaBan: 0,
                     },
                   ],
-                }))
-              }
-              className="w-full rounded-xl border border-dashed border-slate-300 py-2 text-sm text-slate-600"
+                }));
+                if (errors.products)
+                  setErrors((prev) => {
+                    const { products, ...rest } = prev;
+                    return rest;
+                  });
+              }}
+              className="w-full rounded-xl border border-dashed border-slate-300 py-2 text-sm text-slate-600 relative"
             >
               + Thêm sản phẩm
+              {errors.products && (
+                <p className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-rose-600">
+                  {errors.products}
+                </p>
+              )}
             </button>
           </div>
 
@@ -945,7 +893,10 @@ function EditOrderModal({
           <button
             type="button"
             disabled={saving}
-            onClick={() => onSave(form, total)}
+            onClick={() => {
+              if (validate()) onSave(form, total);
+              else toast.error("Vui lòng kiểm tra lại thông tin");
+            }}
             className={`flex-1 rounded-xl py-2.5 text-sm font-semibold text-white ${
               saving
                 ? "bg-slate-400"
@@ -1029,7 +980,77 @@ function StatusDropdown({ value, onChange }) {
   );
 }
 
-function FilterFields({ filters, setFilters, statusFilter, setStatusFilter }) {
+function CustomDropdown({ value, onChange, options, className = "" }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target)) setOpen(false);
+    };
+    const onEsc = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("touchstart", onDocClick);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("touchstart", onDocClick);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, []);
+
+  const selected = options.find((o) => o.value === value) ||
+    options[0] || { label: "" };
+
+  return (
+    <div ref={ref} className={`relative ${className}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="relative min-w-[120px] w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-left text-sm font-semibold text-slate-800 shadow-[0_2px_8px_rgba(0,0,0,0.04)] focus:border-rose-700 focus:outline-none focus:ring-1 focus:ring-rose-500/50 transition-all"
+      >
+        <span className="block pr-5 truncate">{selected.label}</span>
+        <span
+          className={`absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+        >
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div className="absolute z-40 mt-1.5 max-h-56 min-w-max w-full overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg right-0">
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => {
+                onChange(opt.value);
+                setOpen(false);
+              }}
+              className={`block w-full rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                value === opt.value
+                  ? "bg-rose-50 text-rose-700 font-semibold"
+                  : "text-slate-700 hover:bg-rose-50"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterFields({
+  filters,
+  setFilters,
+  statusFilter,
+  setStatusFilter,
+  activeTab,
+}) {
   const inputCls =
     "w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all";
 
@@ -1071,14 +1092,16 @@ function FilterFields({ filters, setFilters, statusFilter, setStatusFilter }) {
       </div>
       <div>
         <label className="mb-1 block text-xs font-semibold text-slate-500 uppercase tracking-wide">
-          Tên khách
+          {activeTab === "orders" ? "Tên khách" : "Nhà cung cấp"}
         </label>
         <input
           value={filters.tenKhach}
           onChange={(e) =>
             setFilters((p) => ({ ...p, tenKhach: e.target.value }))
           }
-          placeholder="Nhập tên khách"
+          placeholder={
+            activeTab === "orders" ? "Nhập tên khách" : "Nhập nhà CC"
+          }
           className={inputCls}
         />
       </div>
@@ -1112,9 +1135,148 @@ function FilterFields({ filters, setFilters, statusFilter, setStatusFilter }) {
   );
 }
 
+function ReceiptHistoryCard({ receipt }) {
+  const [open, setOpen] = useState(false);
+  const total =
+    receipt.tongTienPhieu ||
+    (receipt.products || []).reduce((acc, p) => acc + p.thanhTien, 0);
+
+  return (
+    <article className="rounded-2xl border border-blue-200 bg-white p-4 md:p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs text-slate-500">Mã phiếu nhập</p>
+          <h3 className="text-lg font-bold text-slate-900">
+            {receipt.maPhieu}
+          </h3>
+          <p className="text-sm text-slate-500 mt-1">
+            Ngày nhập: {receipt.ngayNhap || "-"}
+          </p>
+          <p className="text-sm text-slate-500">
+            NCC: {receipt.nhaCungCap || "Không rõ"}
+          </p>
+        </div>
+        <div className="text-right">
+          <StatusBadge status={receipt.trangThai || "Đã thanh toán"} />
+          <p className="text-xs text-slate-500 mt-2">Tổng tiền phiếu</p>
+          <p className="text-lg font-bold text-blue-700">{fmt(total)}</p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <p className="text-sm text-slate-600 truncate">
+          Ghi chú: {receipt.ghiChu || "-"}
+        </p>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+        >
+          {open ? "Ẩn chi tiết" : "Xem chi tiết"}
+        </button>
+      </div>
+
+      {open && (
+        <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
+          <div className="md:hidden divide-y divide-slate-100">
+            {(receipt.products || []).map((p, idx) => (
+              <div key={`${receipt.maPhieu}-m-${idx}`} className="px-3 py-2.5">
+                <p className="text-sm font-semibold text-slate-800">
+                  {p.tenSanPham}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {p.donVi || "-"} | SL {fmt(p.soLuong)} | Giá nhập{" "}
+                  {fmt(p.donGiaNhap)}
+                </p>
+                <p className="mt-1 text-sm font-bold text-slate-800">
+                  Thành tiền: {fmt(p.thanhTien)}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full min-w-[560px] text-sm">
+              <thead className="bg-slate-50 text-slate-600">
+                <tr>
+                  <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide whitespace-nowrap">
+                    Sản phẩm
+                  </th>
+                  <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide whitespace-nowrap">
+                    Nhóm hàng
+                  </th>
+                  <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide whitespace-nowrap">
+                    Đơn vị
+                  </th>
+                  <th className="px-3 py-2.5 text-right text-xs font-bold uppercase tracking-wide whitespace-nowrap">
+                    SL
+                  </th>
+                  <th className="px-3 py-2.5 text-right text-xs font-bold uppercase tracking-wide whitespace-nowrap">
+                    Giá nhập
+                  </th>
+                  <th className="px-3 py-2.5 text-right text-xs font-bold uppercase tracking-wide whitespace-nowrap">
+                    Thành tiền
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {(receipt.products || []).map((p, idx) => (
+                  <tr
+                    key={`${receipt.maPhieu}-${idx}`}
+                    className="border-t border-slate-100"
+                  >
+                    <td className="px-3 py-2 text-slate-800 whitespace-nowrap">
+                      {p.tenSanPham}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600 whitespace-nowrap">
+                      {p.nhomHang || "-"}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600 whitespace-nowrap">
+                      {p.donVi || "-"}
+                    </td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      {fmt(p.soLuong)}
+                    </td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      {fmt(p.donGiaNhap)}
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold text-slate-800 whitespace-nowrap">
+                      {fmt(p.thanhTien)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </article>
+  );
+}
+
 export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("orders");
   const [orders, setOrders] = useState([]);
+  const [receipts, setReceipts] = useState([]);
+  const [revenuePeriodType, setRevenuePeriodType] = useState("all");
+  const [revenuePeriodValue, setRevenuePeriodValue] = useState("current");
+  const [showInventory, setShowInventory] = useState(() => {
+    return localStorage.getItem("enable_inventory") === "true";
+  });
+
+  useEffect(() => {
+    const handleSettingChange = (e) => {
+      setShowInventory(e.detail);
+      if (!e.detail) setActiveTab("orders");
+    };
+    window.addEventListener("inventory_setting_changed", handleSettingChange);
+    return () =>
+      window.removeEventListener(
+        "inventory_setting_changed",
+        handleSettingChange,
+      );
+  }, []);
   const [productCatalog, setProductCatalog] = useState([]);
   const [customerCatalog, setCustomerCatalog] = useState([]);
   const [bankConfig, setBankConfig] = useState(() => readCachedBankConfig());
@@ -1153,7 +1315,7 @@ export default function HistoryPage() {
     }
   };
 
-  const loadHistory = async () => {
+  const loadOrderHistory = async () => {
     setLoading(true);
     try {
       const res = await getOrderHistory();
@@ -1171,8 +1333,46 @@ export default function HistoryPage() {
     }
   };
 
+  const loadReceiptHistory = async () => {
+    setLoading(true);
+    try {
+      const res = await getReceiptHistory();
+      if (res?.success && Array.isArray(res.data)) {
+        const grouped = res.data.reduce((acc, c) => {
+          if (!acc[c.maPhieu]) {
+            acc[c.maPhieu] = {
+              maPhieu: c.maPhieu,
+              nhaCungCap: c.nhaCungCap,
+              ngayNhap: c.ngayNhap,
+              ghiChu: c.ghiChu,
+              tongTienPhieu: c.tongTienPhieu || 0,
+              trangThai: c.trangThai,
+              products: [],
+            };
+          }
+          acc[c.maPhieu].products.push(c);
+          if (!acc[c.maPhieu].tongTienPhieu && c.tongTienPhieu)
+            acc[c.maPhieu].tongTienPhieu = c.tongTienPhieu;
+          return acc;
+        }, {});
+        setReceipts(Object.values(grouped));
+      } else {
+        setReceipts([]);
+      }
+    } catch (e) {
+      setReceipts([]);
+      toast.error("Không tải được lịch sử nhập kho");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    loadHistory();
+    if (activeTab === "orders" && orders.length === 0) loadOrderHistory();
+    if (activeTab === "receipts" && receipts.length === 0) loadReceiptHistory();
+  }, [activeTab]);
+
+  useEffect(() => {
     loadProductCatalog();
     loadCustomerCatalog();
     // Load bank config for QR button
@@ -1207,33 +1407,42 @@ export default function HistoryPage() {
 
   const dateSearchMeta = useMemo(() => getDateSearchMeta(query), [query]);
 
+  const loadHistory = () => {
+    if (activeTab === "orders") loadOrderHistory();
+    else loadReceiptHistory();
+  };
+
   const filteredOrders = useMemo(() => {
+    const list = activeTab === "orders" ? orders : receipts;
     const qAll = foldText(query);
     const qKhach = foldText(filters.tenKhach);
     const qMa = foldText(filters.maPhieu);
     const qSanPham = foldText(filters.tenSanPham);
 
-    return orders.filter((order) => {
-      const orderStatusCode = getStatusCode(order.trangThai);
+    return list.filter((item) => {
+      const itemStatusCode = getStatusCode(item.trangThai);
       const statusOk =
         statusFilter === "ALL" ||
-        (statusFilter === "PAID" && orderStatusCode === "PAID") ||
-        (statusFilter === "PARTIAL" && orderStatusCode === "PARTIAL") ||
-        (statusFilter === "DEBT" && orderStatusCode === "DEBT");
+        (statusFilter === "PAID" && itemStatusCode === "PAID") ||
+        (statusFilter === "PARTIAL" && itemStatusCode === "PARTIAL") ||
+        (statusFilter === "DEBT" && itemStatusCode === "DEBT");
 
       if (!statusOk) return false;
 
-      const orderDate = toIsoDate(order.ngayBan);
-      if ((filters.fromDate || filters.toDate) && !orderDate) return false;
-      if (filters.fromDate && orderDate < filters.fromDate) return false;
-      if (filters.toDate && orderDate > filters.toDate) return false;
+      const itemDate = toIsoDate(
+        activeTab === "orders" ? item.ngayBan : item.ngayNhap,
+      );
+      if ((filters.fromDate || filters.toDate) && !itemDate) return false;
+      if (filters.fromDate && itemDate < filters.fromDate) return false;
+      if (filters.toDate && itemDate > filters.toDate) return false;
 
-      if (qKhach && !foldText(order.tenKhach || "").includes(qKhach))
-        return false;
-      if (qMa && !foldText(order.maPhieu || "").includes(qMa)) return false;
+      const tenDoiTac =
+        activeTab === "orders" ? item.tenKhach : item.nhaCungCap;
+      if (qKhach && !foldText(tenDoiTac || "").includes(qKhach)) return false;
+      if (qMa && !foldText(item.maPhieu || "").includes(qMa)) return false;
 
       if (qSanPham) {
-        const productText = (order.products || [])
+        const productText = (item.products || [])
           .map((p) => p.tenSanPham)
           .join(" ");
         if (!foldText(productText).includes(qSanPham)) return false;
@@ -1242,16 +1451,21 @@ export default function HistoryPage() {
       if (qAll) {
         if (dateSearchMeta.isDateQuery) {
           if (!dateSearchMeta.isValid) return false;
-          if (!hasDateTokenMatch(order.ngayBan, dateSearchMeta.tokens))
+          if (
+            !hasDateTokenMatch(
+              activeTab === "orders" ? item.ngayBan : item.ngayNhap,
+              dateSearchMeta.tokens,
+            )
+          )
             return false;
         } else {
-          const productTextAll = (order.products || [])
+          const productTextAll = (item.products || [])
             .map((p) => p.tenSanPham)
             .join(" ");
           const allText = [
-            order.maPhieu,
-            order.ngayBan,
-            order.tenKhach,
+            item.maPhieu,
+            activeTab === "orders" ? item.ngayBan : item.ngayNhap,
+            tenDoiTac,
             productTextAll,
           ].join(" ");
           if (!foldText(allText).includes(qAll)) return false;
@@ -1260,25 +1474,164 @@ export default function HistoryPage() {
 
       return true;
     });
-  }, [orders, filters, statusFilter, query, dateSearchMeta]);
+  }, [
+    orders,
+    receipts,
+    activeTab,
+    filters,
+    statusFilter,
+    query,
+    dateSearchMeta,
+  ]);
+
+  const revenuePeriodTypeOptions = [
+    { value: "all", label: "Tất cả" },
+    { value: "week", label: "Tuần" },
+    { value: "month", label: "Tháng" },
+    { value: "year", label: "Năm" },
+  ];
+
+  const revenuePeriodValueOptions = useMemo(() => {
+    const formatD = (d) => `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    if (revenuePeriodType === "week") {
+      const options = [];
+      const thisW = new Date(today);
+      thisW.setDate(thisW.getDate() - ((thisW.getDay() + 6) % 7)); // Monday of this week
+
+      for (let i = 0; i < 5; i++) {
+        const startW = new Date(thisW);
+        startW.setDate(thisW.getDate() - i * 7);
+        const endW = new Date(startW);
+        endW.setDate(startW.getDate() + 6);
+
+        let label = `Tuần từ ${formatD(startW)} - ${formatD(endW)}`;
+        if (i === 0) label = `Tuần này (${formatD(startW)} - ${formatD(endW)})`;
+        if (i === 1)
+          label = `Tuần trước (${formatD(startW)} - ${formatD(endW)})`;
+
+        options.push({ value: String(i), label });
+      }
+      return options;
+    }
+
+    if (revenuePeriodType === "month") {
+      const options = [];
+      for (let i = 0; i < 12; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const y = d.getFullYear();
+        const m = d.getMonth() + 1;
+        let label = `Tháng ${m}/${y}`;
+        if (i === 0) label = `Tháng này (T${m})`;
+        if (i === 1) label = `Tháng trước (T${m})`;
+
+        options.push({ value: `${y}-${pad2(m)}`, label });
+      }
+      return options;
+    }
+
+    if (revenuePeriodType === "year") {
+      const options = [];
+      const currentY = now.getFullYear();
+      for (let i = 0; i < 5; i++) {
+        const y = currentY - i;
+        let label = `Năm ${y}`;
+        if (i === 0) label = `Năm nay (${y})`;
+        if (i === 1) label = `Năm trước (${y})`;
+        options.push({ value: String(y), label });
+      }
+      return options;
+    }
+    return [];
+  }, [revenuePeriodType]);
+
+  const handlePeriodTypeChange = (type) => {
+    setRevenuePeriodType(type);
+    if (type === "month") {
+      const now = new Date();
+      setRevenuePeriodValue(`${now.getFullYear()}-${pad2(now.getMonth() + 1)}`);
+    } else if (type === "year") {
+      setRevenuePeriodValue(String(new Date().getFullYear()));
+    } else if (type === "week") {
+      setRevenuePeriodValue("0");
+    } else {
+      setRevenuePeriodValue("current");
+    }
+  };
+
+  const periodFilteredOrders = useMemo(() => {
+    if (activeTab !== "orders") return [];
+    if (revenuePeriodType === "all") return orders;
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    let start, end;
+    if (revenuePeriodType === "week") {
+      const i = parseInt(revenuePeriodValue || "0", 10);
+      const thisW = new Date(today);
+      thisW.setDate(thisW.getDate() - ((thisW.getDay() + 6) % 7)); // Monday of this week
+
+      start = new Date(thisW);
+      start.setDate(thisW.getDate() - i * 7);
+
+      end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+    } else if (revenuePeriodType === "month") {
+      const [y, m] = (revenuePeriodValue || "").split("-");
+      if (y && m) {
+        start = new Date(parseInt(y), parseInt(m) - 1, 1);
+        end = new Date(parseInt(y), parseInt(m), 0, 23, 59, 59, 999);
+      } else {
+        return orders; // fallback
+      }
+    } else if (revenuePeriodType === "year") {
+      const y = parseInt(revenuePeriodValue || now.getFullYear(), 10);
+      start = new Date(y, 0, 1);
+      end = new Date(y, 11, 31, 23, 59, 59, 999);
+    } else {
+      return orders;
+    }
+
+    const startIso = toIsoDate(
+      `${pad2(start.getDate())}/${pad2(start.getMonth() + 1)}/${start.getFullYear()}`,
+    );
+    const endIso = toIsoDate(
+      `${pad2(end.getDate())}/${pad2(end.getMonth() + 1)}/${end.getFullYear()}`,
+    );
+
+    return orders.filter((o) => {
+      const iso = toIsoDate(o.ngayBan);
+      if (!iso) return false;
+      return iso >= startIso && iso <= endIso;
+    });
+  }, [orders, activeTab, revenuePeriodType, revenuePeriodValue]);
 
   const totalRevenue = useMemo(
-    () => filteredOrders.reduce((sum, o) => sum + toNum(o.tongHoaDon), 0),
-    [filteredOrders],
+    () =>
+      activeTab === "orders"
+        ? periodFilteredOrders.reduce((sum, o) => sum + toNum(o.tongHoaDon), 0)
+        : 0,
+    [periodFilteredOrders, activeTab],
   );
 
   const totalProfit = useMemo(
     () =>
-      filteredOrders.reduce((sum, o) => {
-        const orderProfit = (o.products || []).reduce((acc, p) => {
-          const qty = toNum(p.soLuong);
-          const sell = toNum(p.donGiaBan);
-          const cost = toNum(p.giaVon);
-          return acc + (sell - cost) * qty;
-        }, 0);
-        return sum + orderProfit;
-      }, 0),
-    [filteredOrders],
+      activeTab === "orders"
+        ? periodFilteredOrders.reduce((sum, o) => {
+            const orderProfit = (o.products || []).reduce((acc, p) => {
+              const qty = toNum(p.soLuong);
+              const sell = toNum(p.donGiaBan);
+              const cost = toNum(p.giaVon);
+              return acc + (sell - cost) * qty;
+            }, 0);
+            return sum + orderProfit;
+          }, 0)
+        : 0,
+    [periodFilteredOrders, activeTab],
   );
 
   const resetFilters = () => {
@@ -1302,17 +1655,66 @@ export default function HistoryPage() {
     const key = String(deleteTarget?.maPhieu || "").trim();
     if (!key) return;
     setDeletingCode(key);
+    const toastId = toast.loading("Đang xóa hóa đơn...", {
+      duration: Infinity,
+    });
     try {
       const res = await deleteOrder(key);
       if (res?.success) {
-        toast.success(res.message || "Đã xóa hóa đơn");
-        await loadHistory();
-        setDeleteTarget(null);
+        if (res?.queued) {
+          toast.success(
+            res.message || "Yêu cầu xóa đã vào hàng đợi, đang xử lý trong nền.",
+            { id: toastId, duration: 5000 },
+          );
+          setDeleteTarget(null);
+          // Queue có độ trễ; thử tự refresh vài lần để UI bắt kịp trạng thái xóa thật.
+          (async () => {
+            for (let i = 0; i < 4; i++) {
+              await new Promise((resolve) => setTimeout(resolve, 1500));
+              try {
+                const latest = await getOrderHistory();
+                if (latest?.success && Array.isArray(latest.data)) {
+                  setOrders(latest.data);
+                  const stillExists = latest.data.some(
+                    (o) => String(o?.maPhieu || "").trim() === key,
+                  );
+                  if (!stillExists) return;
+                }
+              } catch (e) {
+                // noop
+              }
+            }
+          })();
+        } else {
+          toast.success(res.message || "Đã xóa hóa đơn", {
+            id: toastId,
+            duration: 5000,
+          });
+          try { formatAllSheets().catch(() => {}); } catch (e) {}
+          setDeleteTarget(null);
+          await loadHistory();
+        }
       } else {
-        toast.error(res?.message || "Xóa hóa đơn thất bại");
+        const msg = String(res?.message || "");
+        if (msg.includes("Không tìm thấy hóa đơn")) {
+          setOrders((prev) =>
+            prev.filter((o) => String(o?.maPhieu || "").trim() !== key),
+          );
+          setDeleteTarget(null);
+          toast.success("Hóa đơn đã không còn tồn tại (đã được xóa trước đó).", {
+            id: toastId,
+            duration: 5000,
+          });
+        } else {
+          toast.error(msg || "Xóa hóa đơn thất bại", {
+            id: toastId,
+            duration: 5000,
+          });
+        }
       }
     } catch (e) {
-      toast.error("Xóa hóa đơn thất bại");
+      const errMsg = e?.message ? `Xóa hóa đơn thất bại: ${e.message}` : "Xóa hóa đơn thất bại";
+      toast.error(errMsg, { id: toastId, duration: 5000 });
     } finally {
       setDeletingCode("");
     }
@@ -1341,7 +1743,55 @@ export default function HistoryPage() {
         return toast.error("Số tiền đã trả không được lớn hơn tổng hóa đơn");
     }
 
+    // Snapshot for rollback
+    const ordersSnapshot = orders;
+    const editingSnapshot = editingOrder;
+
+    // Build optimistic order update
+    const statusLabel =
+      form.trangThaiCode === "DEBT"
+        ? "Nợ"
+        : form.trangThaiCode === "PARTIAL"
+          ? "Trả một phần"
+          : "Đã thanh toán";
+    const soTienDaTra =
+      form.trangThaiCode === "PARTIAL"
+        ? Math.max(toNum(form.soTienDaTra), 0)
+        : 0;
+
+    const optimisticOrder = {
+      maPhieu,
+      ngayBan: form.ngayBan || "",
+      tenKhach: String(form.tenKhach || "").trim() || "Khách ghé thăm",
+      soDienThoai: String(form.soDienThoai || "").trim(),
+      trangThai: statusLabel,
+      ghiChu: String(form.ghiChu || "-").trim() || "-",
+      tongHoaDon: total,
+      tienNo:
+        form.trangThaiCode === "PARTIAL"
+          ? Math.max(total - soTienDaTra, 0)
+          : form.trangThaiCode === "DEBT"
+            ? total
+            : 0,
+      products: products.map((p) => ({
+        ...p,
+        thanhTien: p.soLuong * p.donGiaBan,
+      })),
+    };
+
+    // Optimistic UI: update list + close modal immediately
+    setOrders((prev) =>
+      prev.map((o) =>
+        String(o.maPhieu || "").trim() === String(form.maPhieuOriginal || "").trim()
+          ? { ...o, ...optimisticOrder }
+          : o,
+      ),
+    );
+    setEditingOrder(null);
+
     setSavingOrder(true);
+    const toastId = toast.loading("Đang lưu thay đổi...", { duration: Infinity });
+
     try {
       const payload = {
         maPhieuOriginal: form.maPhieuOriginal,
@@ -1353,24 +1803,37 @@ export default function HistoryPage() {
           maPhieu,
           ngayBan: form.ngayBan || "",
           trangThaiCode: form.trangThaiCode || "PAID",
-          soTienDaTra:
-            form.trangThaiCode === "PARTIAL"
-              ? Math.max(toNum(form.soTienDaTra), 0)
-              : 0,
+          soTienDaTra,
           ghiChu: String(form.ghiChu || "-").trim() || "-",
         },
         products,
       };
       const res = await updateOrder(payload);
       if (res?.success) {
-        toast.success(res.message || "Đã cập nhật hóa đơn");
-        setEditingOrder(null);
-        await loadHistory();
+        toast.success(res.message || "Đã cập nhật hóa đơn", {
+          id: toastId,
+          duration: 5000,
+        });
+        try { if (!res?.queued) formatAllSheets().catch(() => {}); } catch (e) {}
+        // Fire-and-forget: sync real data in background
+        loadHistory().catch(() => {});
       } else {
-        toast.error(res?.message || "Cập nhật hóa đơn thất bại");
+        // Rollback
+        setOrders(ordersSnapshot);
+        setEditingOrder(editingSnapshot);
+        toast.error(res?.message || "Cập nhật hóa đơn thất bại, đã khôi phục.", {
+          id: toastId,
+          duration: 5000,
+        });
       }
     } catch (e) {
-      toast.error("Cập nhật hóa đơn thất bại");
+      // Rollback
+      setOrders(ordersSnapshot);
+      setEditingOrder(editingSnapshot);
+      toast.error("Cập nhật hóa đơn thất bại, đã khôi phục.", {
+        id: toastId,
+        duration: 5000,
+      });
     } finally {
       setSavingOrder(false);
     }
@@ -1379,42 +1842,91 @@ export default function HistoryPage() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-50 to-rose-50/30">
       <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 md:py-8 pb-24">
-        <div className="mb-6 md:mb-8">
-          <h1 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight">
-            Lịch sử đơn hàng
-          </h1>
-          <p className="mt-2 text-sm md:text-base text-slate-500">
-            Tra cứu đơn hàng theo ngày, khách, mã phiếu và sản phẩm.
-          </p>
+        <div className="mb-6 md:mb-8 flex flex-col md:flex-row md:items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight">
+              Lịch sử {activeTab === "orders" ? "đơn hàng" : "nhập kho"}
+            </h1>
+            <p className="mt-2 text-sm md:text-base text-slate-500">
+              Tra cứu {activeTab === "orders" ? "đơn hàng" : "phiếu nhập"} theo
+              ngày, {activeTab === "orders" ? "khách" : "nhà cung cấp"}, mã
+              phiếu và sản phẩm.
+            </p>
+          </div>
+          {showInventory && (
+            <div className="flex bg-slate-200/50 p-1 rounded-xl w-full md:w-auto mt-2 md:mt-0">
+              <button
+                type="button"
+                onClick={() => setActiveTab("orders")}
+                className={`flex-1 md:w-32 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === "orders" ? "bg-white text-rose-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+              >
+                Bán hàng
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("receipts")}
+                className={`flex-1 md:w-32 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === "receipts" ? "bg-white text-rose-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+              >
+                Nhập kho
+              </button>
+            </div>
+          )}
         </div>
 
-        <section className="grid gap-3 md:grid-cols-2 mb-4">
-          <div className="rounded-2xl border border-rose-200 bg-rose-50/60 px-4 py-3 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">
-              Doanh thu
-            </p>
-            <p className="mt-1 text-2xl font-black text-rose-700">
-              {fmt(totalRevenue)}
-            </p>
-            <p className="mt-1 text-xs text-rose-700">Theo bộ lọc hiện tại</p>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Lợi nhuận
-            </p>
-            <p
-              className={`mt-1 text-2xl font-black ${totalProfit >= 0 ? "text-emerald-600" : "text-rose-600"}`}
-            >
-              {fmt(totalProfit)}
-            </p>
-            <p className="mt-1 text-xs text-slate-500">Chưa trừ chi phí khác</p>
-          </div>
-        </section>
+        {activeTab === "orders" && (
+          <section className="mb-4">
+            <div className="mb-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <h2 className="text-sm font-bold text-slate-800">Doanh thu</h2>
+              <div className="flex items-center gap-2 self-start md:self-auto">
+                <CustomDropdown
+                  value={revenuePeriodType}
+                  onChange={handlePeriodTypeChange}
+                  options={revenuePeriodTypeOptions}
+                />
+                {revenuePeriodType !== "all" && (
+                  <CustomDropdown
+                    value={revenuePeriodValue}
+                    onChange={setRevenuePeriodValue}
+                    options={revenuePeriodValueOptions}
+                  />
+                )}
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-rose-200 bg-rose-50/60 px-4 py-3 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">
+                  Doanh thu
+                </p>
+                <p className="mt-1 text-2xl font-black text-rose-700">
+                  {fmt(totalRevenue)}
+                </p>
+                <p className="mt-1 text-xs text-rose-700">
+                  {revenuePeriodType === "all"
+                    ? "Tất cả thời gian"
+                    : "Theo khoảng đã chọn"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Lợi nhuận
+                </p>
+                <p
+                  className={`mt-1 text-2xl font-black ${totalProfit >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                >
+                  {fmt(totalProfit)}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Chưa trừ chi phí khác
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 md:p-5 shadow-sm mb-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm md:text-base font-bold text-slate-800">
-              Bộ lọc đơn hàng
+              Bộ lọc
             </h2>
             <span className="text-xs text-slate-400">
               Lọc nhanh theo nhu cầu
@@ -1457,6 +1969,7 @@ export default function HistoryPage() {
               setFilters={setFilters}
               statusFilter={statusFilter}
               setStatusFilter={setStatusFilter}
+              activeTab={activeTab}
             />
             <div className="mt-3 flex items-center gap-2">
               <button
@@ -1503,6 +2016,7 @@ export default function HistoryPage() {
                 setFilters={setFilters}
                 statusFilter={statusFilter}
                 setStatusFilter={setStatusFilter}
+                activeTab={activeTab}
               />
               <div className="mt-4 flex gap-2">
                 <button
@@ -1526,24 +2040,33 @@ export default function HistoryPage() {
 
         {loading ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
-            Đang tải lịch sử đơn hàng...
+            Đang tải lịch sử {activeTab === "orders" ? "đơn hàng" : "nhập kho"}
+            ...
           </div>
         ) : filteredOrders.length === 0 ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
-            Không có đơn hàng phù hợp.
+            Không có {activeTab === "orders" ? "đơn hàng" : "phiếu nhập"} phù
+            hợp.
           </div>
         ) : (
           <div className="space-y-3">
-            {filteredOrders.map((order, idx) => (
-              <HistoryCard
-                key={`${order.maPhieu}-${idx}`}
-                order={order}
-                deleting={deletingCode === order.maPhieu}
-                onEdit={() => setEditingOrder(enrichOrderForEdit(order))}
-                onDelete={() => handleDeleteOrder(order.maPhieu)}
-                bankConfig={bankConfig}
-              />
-            ))}
+            {filteredOrders.map((item, idx) =>
+              activeTab === "orders" ? (
+                <HistoryCard
+                  key={`${item.maPhieu}-${idx}`}
+                  order={item}
+                  deleting={deletingCode === item.maPhieu}
+                  onEdit={() => setEditingOrder(enrichOrderForEdit(item))}
+                  onDelete={() => handleDeleteOrder(item.maPhieu)}
+                  bankConfig={bankConfig}
+                />
+              ) : (
+                <ReceiptHistoryCard
+                  key={`${item.maPhieu}-${idx}`}
+                  receipt={item}
+                />
+              ),
+            )}
           </div>
         )}
       </div>

@@ -1,43 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getOrderHistory } from "../api";
 import toast from "react-hot-toast";
-
-const fmt = (n) => Number(n || 0).toLocaleString("vi-VN");
-const toNum = (v) => Number(String(v ?? "").replace(/[^\d.-]/g, "")) || 0;
-
-const foldText = (v) =>
-  String(v || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .trim();
-
-const toLocalIso = (date) => {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-};
-
-const getStatusCode = (status) => {
-  const key = foldText(status).replace(/\s+/g, " ");
-  if (!key) return "PAID";
-  if (key.includes("tra mot phan") || key.includes("tra 1 phan"))
-    return "PARTIAL";
-  if (key === "no" || key.includes(" no ")) return "DEBT";
-  if (key.includes("da thanh toan")) return "PAID";
-  return "PAID";
-};
-
-const toIsoDate = (v) => {
-  const raw = String(v || "").trim();
-  if (!raw) return "";
-  const m = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  return "";
-};
+import { formatMoney as fmt, parseNumber as toNum, normalizeText as foldText, toLocalIso, getStatusCode, toIsoDate, calculateStats, formatShortDate, startOfWeek } from "../../core/core";
 
 const buildSparkPath = (values, width, height) => {
   if (!values.length) return "";
@@ -162,19 +126,6 @@ const formatScaled = (value, scale) => {
   return formatted;
 };
 
-const startOfWeek = (date) => {
-  const d = new Date(date);
-  const day = (d.getDay() + 6) % 7;
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - day);
-  return d;
-};
-
-const formatShortDate = (date) => {
-  const d = String(date.getDate()).padStart(2, "0");
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  return `${d}/${m}`;
-};
 
 function PillSelect({
   value,
@@ -307,291 +258,16 @@ export default function StatsPage() {
     }
   }, [availableYears, trendYear]);
 
-  const stats = useMemo(() => {
-    const revenue = sourceOrders.reduce(
-      (sum, o) => sum + toNum(o.tongHoaDon),
-      0,
-    );
-    const profit = sourceOrders.reduce((sum, o) => {
-      const orderProfit = (o.products || []).reduce((acc, p) => {
-        const qty = toNum(p.soLuong);
-        const sell = toNum(p.donGiaBan);
-        const cost = toNum(p.giaVon);
-        return acc + (sell - cost) * qty;
-      }, 0);
-      return sum + orderProfit;
-    }, 0);
-
-    const statusCounts = { PAID: 0, PARTIAL: 0, DEBT: 0 };
-    sourceOrders.forEach((o) => {
-      statusCounts[getStatusCode(o.trangThai)] += 1;
-    });
-
-    const revenueByDate = {};
-    const profitByDate = {};
-    const revenueByMonth = {};
-    const profitByMonth = {};
-    const revenueByYear = {};
-    const profitByYear = {};
-    sourceOrders.forEach((o) => {
-      const iso = toIsoDate(o.ngayBan);
-      if (!iso) return;
-      const orderTotal = toNum(o.tongHoaDon);
-      const orderProfit = (o.products || []).reduce((acc, p) => {
-        const qty = toNum(p.soLuong);
-        const sell = toNum(p.donGiaBan);
-        const cost = toNum(p.giaVon);
-        return acc + (sell - cost) * qty;
-      }, 0);
-      const monthKey = iso.slice(0, 7);
-      const yearKey = iso.slice(0, 4);
-      revenueByDate[iso] = (revenueByDate[iso] || 0) + orderTotal;
-      profitByDate[iso] = (profitByDate[iso] || 0) + orderProfit;
-      revenueByMonth[monthKey] = (revenueByMonth[monthKey] || 0) + orderTotal;
-      profitByMonth[monthKey] = (profitByMonth[monthKey] || 0) + orderProfit;
-      revenueByYear[yearKey] = (revenueByYear[yearKey] || 0) + orderTotal;
-      profitByYear[yearKey] = (profitByYear[yearKey] || 0) + orderProfit;
-    });
-
-    let periodLabels = [];
-    let periodRevenue = [];
-    let periodProfit = [];
-    let periodRangeLabel = "";
-    let currentStart, currentEnd;
-    if (trendMode === "week") {
-      const dayNames = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
-      if (trendWeekPreset === "last7") {
-        currentEnd = new Date();
-        currentEnd.setHours(0, 0, 0, 0);
-        currentStart = new Date(currentEnd);
-        currentStart.setDate(currentStart.getDate() - 6);
-        for (let i = 0; i < 7; i += 1) {
-          const d = new Date(currentStart);
-          d.setDate(currentStart.getDate() + i);
-          const iso = toLocalIso(d);
-          periodLabels.push(formatShortDate(d));
-          periodRevenue.push(revenueByDate[iso] || 0);
-          periodProfit.push(profitByDate[iso] || 0);
-        }
-        periodRangeLabel = `7 ngày qua · ${formatShortDate(currentStart)} - ${formatShortDate(currentEnd)}`;
-      } else if (trendWeekPreset === "custom") {
-        currentStart = new Date(customFrom + "T00:00:00");
-        currentEnd = new Date(customTo + "T00:00:00");
-        if (currentStart > currentEnd) {
-          const tmp = currentStart;
-          currentStart = currentEnd;
-          currentEnd = tmp;
-        }
-        const diffDays = Math.round((currentEnd - currentStart) / 86400000);
-        for (let i = 0; i <= diffDays; i += 1) {
-          const d = new Date(currentStart);
-          d.setDate(currentStart.getDate() + i);
-          const iso = toLocalIso(d);
-          periodLabels.push(formatShortDate(d));
-          periodRevenue.push(revenueByDate[iso] || 0);
-          periodProfit.push(profitByDate[iso] || 0);
-        }
-        periodRangeLabel = `${formatShortDate(currentStart)} - ${formatShortDate(currentEnd)}`;
-      } else {
-        const weekStartBase = startOfWeek(new Date());
-        const targetWeekStart = new Date(weekStartBase);
-        targetWeekStart.setDate(targetWeekStart.getDate() - 7);
-        currentStart = targetWeekStart;
-        const targetWeekEnd = new Date(targetWeekStart);
-        targetWeekEnd.setDate(targetWeekEnd.getDate() + 6);
-        currentEnd = targetWeekEnd;
-        for (let i = 0; i < 7; i += 1) {
-          const d = new Date(targetWeekStart);
-          d.setDate(targetWeekStart.getDate() + i);
-          const iso = toLocalIso(d);
-          const dayIdx = (d.getDay() + 6) % 7;
-          periodLabels.push(dayNames[dayIdx]);
-          periodRevenue.push(revenueByDate[iso] || 0);
-          periodProfit.push(profitByDate[iso] || 0);
-        }
-        periodRangeLabel = `${formatShortDate(targetWeekStart)} - ${formatShortDate(targetWeekEnd)}`;
-      }
-    } else if (trendMode === "month") {
-      const today = new Date();
-      const numMonths = isDesktop ? 12 : 6;
-      for (let i = numMonths - 1; i >= 0; i -= 1) {
-        const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-        periodLabels.push(`T${d.getMonth() + 1}/${d.getFullYear() % 100}`);
-        periodRevenue.push(revenueByMonth[key] || 0);
-        periodProfit.push(profitByMonth[key] || 0);
-      }
-      const firstMonth = new Date(
-        today.getFullYear(),
-        today.getMonth() - (numMonths - 1),
-        1,
-      );
-      const lastMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-      currentStart = firstMonth;
-      currentEnd = lastMonth;
-      periodRangeLabel = `${numMonths} tháng gần nhất`;
-    } else if (trendMode === "quarter") {
-      if (isDesktop) {
-        periodLabels = ["Quý 1", "Quý 2", "Quý 3", "Quý 4"];
-        periodRevenue = [];
-        periodProfit = [];
-        for (let q = 1; q <= 4; q++) {
-          const qMonths = [1, 2, 3].map((v) => v + (q - 1) * 3);
-          let qRev = 0,
-            qProf = 0;
-          qMonths.forEach((m) => {
-            qRev +=
-              revenueByMonth[`${trendYear}-${String(m).padStart(2, "0")}`] || 0;
-            qProf +=
-              profitByMonth[`${trendYear}-${String(m).padStart(2, "0")}`] || 0;
-          });
-          periodRevenue.push(qRev);
-          periodProfit.push(qProf);
-        }
-        currentStart = new Date(trendYear, 0, 1);
-        currentEnd = new Date(trendYear, 11, 31);
-        periodRangeLabel = `Năm ${trendYear}`;
-      } else {
-        const qMonths = [1, 2, 3].map((v) => v + (trendQuarter - 1) * 3);
-        currentStart = new Date(trendYear, qMonths[0] - 1, 1);
-        currentEnd = new Date(trendYear, qMonths[2], 0);
-        periodLabels = qMonths.map((m) => `T${m}`);
-        periodRevenue = qMonths.map(
-          (m) =>
-            revenueByMonth[`${trendYear}-${String(m).padStart(2, "0")}`] || 0,
-        );
-        periodProfit = qMonths.map(
-          (m) =>
-            profitByMonth[`${trendYear}-${String(m).padStart(2, "0")}`] || 0,
-        );
-        periodRangeLabel = `Quý ${trendQuarter} năm ${trendYear}`;
-      }
-    } else {
-      const endYear = new Date().getFullYear();
-      const startYear = endYear - 4;
-      currentStart = new Date(endYear, 0, 1);
-      currentEnd = new Date(endYear, 11, 31);
-      periodLabels = Array.from({ length: 5 }, (_, i) => String(startYear + i));
-      periodRevenue = periodLabels.map((y) => revenueByYear[y] || 0);
-      periodProfit = periodLabels.map((y) => profitByYear[y] || 0);
-      periodRangeLabel = `${startYear} - ${endYear}`;
-    }
-
-    // --- Period-over-period comparison (Summary Cards) ---
-    let curRevenue = 0;
-    let curProfit = 0;
-    let curOrders = 0;
-
-    let summaryStart, summaryEnd, summaryPrevStart, summaryPrevEnd;
-    const today = new Date();
-
-    if (trendMode === "week") {
-      // "hôm nay"
-      summaryStart = new Date(today);
-      summaryEnd = new Date(today);
-      summaryPrevStart = new Date(today);
-      summaryPrevStart.setDate(today.getDate() - 1);
-      summaryPrevEnd = summaryPrevStart;
-    } else if (trendMode === "month" || trendMode === "quarter") {
-      // "tháng này"
-      summaryStart = new Date(today.getFullYear(), today.getMonth(), 1);
-      summaryEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-      summaryPrevEnd = new Date(summaryStart.getTime() - 86400000);
-      summaryPrevStart = new Date(
-        summaryPrevEnd.getFullYear(),
-        summaryPrevEnd.getMonth(),
-        1,
-      );
-    } else {
-      // "năm nay"
-      summaryStart = new Date(today.getFullYear(), 0, 1);
-      summaryEnd = new Date(today.getFullYear(), 11, 31);
-      summaryPrevStart = new Date(today.getFullYear() - 1, 0, 1);
-      summaryPrevEnd = new Date(today.getFullYear() - 1, 11, 31);
-    }
-
-    if (summaryStart && summaryEnd) {
-      const curStartIso = toLocalIso(summaryStart);
-      const curEndIso = toLocalIso(summaryEnd);
-      sourceOrders.forEach((o) => {
-        const iso = toIsoDate(o.ngayBan);
-        if (!iso) return;
-        if (iso >= curStartIso && iso <= curEndIso) {
-          curRevenue += toNum(o.tongHoaDon);
-          curProfit += (o.products || []).reduce(
-            (acc, p) =>
-              acc + (toNum(p.donGiaBan) - toNum(p.giaVon)) * toNum(p.soLuong),
-            0,
-          );
-          curOrders += 1;
-        }
-      });
-    }
-
-    let prevRevenue = 0,
-      prevProfit = 0,
-      prevOrders = 0;
-    if (summaryPrevStart && summaryPrevEnd) {
-      const prevStartIso = toLocalIso(summaryPrevStart);
-      const prevEndIso = toLocalIso(summaryPrevEnd);
-      sourceOrders.forEach((o) => {
-        const iso = toIsoDate(o.ngayBan);
-        if (!iso) return;
-        if (iso >= prevStartIso && iso <= prevEndIso) {
-          prevRevenue += toNum(o.tongHoaDon);
-          prevProfit += (o.products || []).reduce(
-            (acc, p) =>
-              acc + (toNum(p.donGiaBan) - toNum(p.giaVon)) * toNum(p.soLuong),
-            0,
-          );
-          prevOrders += 1;
-        }
-      });
-    }
-
-    const pctChange = (cur, prev) =>
-      prev === 0
-        ? cur > 0
-          ? 100
-          : 0
-        : Math.round(((cur - prev) / Math.abs(prev)) * 100);
-    const revenueDelta = pctChange(curRevenue, prevRevenue);
-    const profitDelta = pctChange(curProfit, prevProfit);
-    const ordersDelta = pctChange(curOrders, prevOrders);
-
-    const productMap = {};
-    sourceOrders.forEach((o) => {
-      (o.products || []).forEach((p) => {
-        const key = `${p.tenSanPham}||${p.donVi || ""}`;
-        const lineTotal = toNum(p.soLuong) * toNum(p.donGiaBan);
-        productMap[key] = (productMap[key] || 0) + lineTotal;
-      });
-    });
-    const topProducts = Object.entries(productMap)
-      .map(([key, value]) => {
-        const [tenSanPham, donVi] = key.split("||");
-        return { tenSanPham, donVi, value };
-      })
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 6);
-
-    return {
-      revenue,
-      profit,
-      statusCounts,
-      periodLabels,
-      periodRevenue,
-      periodProfit,
-      periodRangeLabel,
-      topProducts,
-      curRevenue,
-      curProfit,
-      curOrders,
-      revenueDelta,
-      profitDelta,
-      ordersDelta,
-    };
-  }, [
+  const stats = useMemo(() => calculateStats({
+    sourceOrders,
+    trendMode,
+    trendWeekPreset,
+    trendQuarter,
+    trendYear,
+    customFrom,
+    customTo,
+    isDesktop,
+  }), [
     sourceOrders,
     trendMode,
     trendWeekPreset,
@@ -746,14 +422,36 @@ export default function StatsPage() {
                         <input
                           type="date"
                           value={customFrom}
-                          onChange={(e) => setCustomFrom(e.target.value)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setCustomFrom(val);
+                            if (!isDesktop && val) {
+                              const dFrom = new Date(val + "T00:00:00");
+                              const dTo = new Date(customTo + "T00:00:00");
+                              if (dTo - dFrom > 6 * 86400000) {
+                                dFrom.setDate(dFrom.getDate() + 6);
+                                setCustomTo(toLocalIso(dFrom));
+                              }
+                            }
+                          }}
                           className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
                         />
                         <span className="text-xs text-slate-400">→</span>
                         <input
                           type="date"
                           value={customTo}
-                          onChange={(e) => setCustomTo(e.target.value)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setCustomTo(val);
+                            if (!isDesktop && val) {
+                              const dTo = new Date(val + "T00:00:00");
+                              const dFrom = new Date(customFrom + "T00:00:00");
+                              if (dTo - dFrom > 6 * 86400000) {
+                                dTo.setDate(dTo.getDate() - 6);
+                                setCustomFrom(toLocalIso(dTo));
+                              }
+                            }
+                          }}
                           className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
                         />
                       </>

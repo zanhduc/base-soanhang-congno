@@ -5,35 +5,16 @@ import {
   getBankConfig,
   getNextOrderFormDefaults,
   getProductCatalog,
+  formatAllSheets,
 } from "../api";
 import toast from "react-hot-toast";
 import { buildVietQrUrl } from "../utils/vietqr";
-
-const fmt = (n) => Number(n).toLocaleString();
-const foldText = (v) =>
-  String(v || "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d");
-
-const toTitleCase = (v) =>
-  String(v || "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .split(" ")
-    .map((word) => {
-      if (!word) return word;
-      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-    })
-    .join(" ");
-
-const getTodayInputDate = () => {
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
-  return local.toISOString().split("T")[0];
-};
+import {
+  formatMoney as fmt,
+  normalizeText as foldText,
+  toTitleCase,
+  getTodayInputDate,
+} from "../../core/core";
 
 const DEFAULT_ORDER_CODE = "01";
 const ORDER_DEFAULTS_CACHE_KEY = "soanhang.orderDefaults";
@@ -181,28 +162,37 @@ function CustomerInfoSection({
   onHideSuggestions,
   customerSuggestions,
   onSelectCustomerSuggestion,
+  errors = {},
 }) {
-  const inputCls =
-    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all";
+  const inputCls = (hasError) =>
+    `w-full rounded-xl border ${
+      hasError ? "border-rose-500 ring-1 ring-rose-500/20" : "border-slate-200"
+    } bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all`;
 
   return (
     <div className="space-y-4">
       <div>
         <label className="block text-sm font-semibold text-slate-800 mb-2">
-          Tên khách hàng
+          Tên khách hàng <span className="text-rose-500">*</span>
         </label>
         <div className="relative">
           <input
             type="text"
-            placeholder="Nhập tên khách hàng"
+            placeholder="Nhập hoặc chọn khách hàng"
             value={customerInfo.tenKhach}
-            onFocus={onShowSuggestions}
+            maxLength={120}
+            onFocus={() => setShowCustomerSuggestions(true)}
             onBlur={() => setTimeout(onHideSuggestions, 120)}
-            onChange={(e) =>
-              onUpdate({ ...customerInfo, tenKhach: e.target.value })
-            }
-            className={inputCls}
+            onChange={(e) => {
+              onUpdate({ ...customerInfo, tenKhach: e.target.value });
+            }}
+            className={inputCls(!!errors.tenKhach)}
           />
+          {errors.tenKhach && (
+            <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+              {errors.tenKhach}
+            </p>
+          )}
           {showCustomerSuggestions && customerSuggestions.length > 0 && (
             <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
               {customerSuggestions.map((c) => (
@@ -233,10 +223,14 @@ function CustomerInfoSection({
           type="tel"
           placeholder="Nhập số điện thoại"
           value={customerInfo.soDienThoai}
+          maxLength={15}
           onChange={(e) =>
-            onUpdate({ ...customerInfo, soDienThoai: e.target.value })
+            onUpdate({
+              ...customerInfo,
+              soDienThoai: e.target.value.replace(/\D/g, ""),
+            })
           }
-          className={inputCls}
+          className={inputCls(false)}
         />
       </div>
     </div>
@@ -244,15 +238,17 @@ function CustomerInfoSection({
 }
 
 function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
-  const inputCls =
-    "w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all";
+  const inputCls = (hasError) =>
+    `w-full min-w-0 rounded-xl border ${
+      hasError ? "border-rose-500 ring-1 ring-rose-500/20" : "border-slate-200"
+    } bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all`;
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-2 sm:gap-4">
         <div className="min-w-0">
           <label className="block text-sm font-semibold text-slate-800 mb-2">
-            Mã phiếu
+            Mã phiếu <span className="text-rose-500">*</span>
           </label>
           <input
             type="text"
@@ -260,16 +256,18 @@ function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
               isLoadingDefaults ? "Đang tạo mã phiếu..." : "Nhập mã phiếu"
             }
             value={orderInfo.maPhieu}
+            maxLength={50}
             onChange={(e) =>
               onUpdate({ ...orderInfo, maPhieu: e.target.value })
             }
-            className={`${inputCls} px-3 sm:px-4 text-[13px] sm:text-sm`}
+            className={`${inputCls(false)} px-3 sm:px-4 text-[13px] sm:text-sm`}
             disabled={isLoadingDefaults}
+            readOnly
           />
         </div>
         <div className="min-w-0">
           <label className="block text-sm font-semibold text-slate-800 mb-2">
-            Ngày bán
+            Ngày bán <span className="text-rose-500">*</span>
           </label>
           <input
             type="date"
@@ -278,7 +276,7 @@ function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
             onChange={(e) =>
               onUpdate({ ...orderInfo, ngayBan: e.target.value })
             }
-            className={`${inputCls} px-2 sm:px-4 text-[13px] sm:text-sm`}
+            className={`${inputCls(false)} px-2 sm:px-4 text-[13px] sm:text-sm`}
             disabled={isLoadingDefaults}
           />
         </div>
@@ -296,6 +294,7 @@ function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
         <textarea
           placeholder="Thêm ghi chú cho đơn hàng..."
           value={orderInfo.ghiChu}
+          maxLength={200}
           onChange={(e) => onUpdate({ ...orderInfo, ghiChu: e.target.value })}
           className={`${inputCls} resize-none`}
           rows={2}
@@ -310,6 +309,10 @@ function ProductListItem({ product, onUpdate, onRemove }) {
   const subText = product.nhomHang
     ? `${product.nhomHang} • ${product.donVi || "Không xác định"}`
     : product.donVi || "Không xác định";
+  const giaVonError =
+    product.giaVon > 0 &&
+    product.donGiaBan > 0 &&
+    product.giaVon > product.donGiaBan;
 
   return (
     <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-4 md:p-5 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200 group">
@@ -338,12 +341,14 @@ function ProductListItem({ product, onUpdate, onRemove }) {
               type="number"
               min="0"
               value={product.soLuong}
-              onChange={(e) =>
+              onChange={(e) => {
+                const val =
+                  e.target.value === "" ? "" : parseInt(e.target.value) || 0;
+                const maxVal = product.tonKhoMax !== undefined ? product.tonKhoMax : 100000;
                 onUpdate({
-                  soLuong:
-                    e.target.value === "" ? "" : parseInt(e.target.value) || 0,
-                })
-              }
+                  soLuong: val === "" ? "" : Math.min(val, maxVal),
+                });
+              }}
               onBlur={(e) => {
                 if (product.soLuong === "" || product.soLuong < 1)
                   onUpdate({ soLuong: 1 });
@@ -366,6 +371,7 @@ function ProductListItem({ product, onUpdate, onRemove }) {
           </label>
           <CurrencyInput
             value={product.donGiaBan}
+            maxLength={20}
             onChange={(v) => onUpdate({ donGiaBan: v })}
             className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
           />
@@ -376,9 +382,21 @@ function ProductListItem({ product, onUpdate, onRemove }) {
           </label>
           <CurrencyInput
             value={product.giaVon || 0}
-            onChange={(v) => onUpdate({ giaVon: v })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
+            maxLength={20}
+            onChange={(v) => {
+              if (v > 0 && product.donGiaBan > 0 && v > product.donGiaBan) {
+                onUpdate({ giaVon: product.donGiaBan });
+              } else {
+                onUpdate({ giaVon: v });
+              }
+            }}
+            className={`w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 transition-all ${giaVonError ? "border-rose-500 focus:border-rose-500 focus:ring-rose-500/20" : "border-slate-200 focus:border-rose-700 focus:ring-rose-700/20"}`}
           />
+          {giaVonError && (
+            <p className="text-[10px] font-semibold text-rose-600 ml-1">
+              Giá vốn không được lớn hơn giá bán
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -389,11 +407,11 @@ function OrderSummary({ totalAmount, totalItems }) {
   return (
     <div className="rounded-2xl border border-rose-700/20 bg-gradient-to-br from-rose-50/50 via-white to-rose-100/30 p-5 md:p-6 shadow-sm">
       <div className="space-y-4">
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center gap-3">
           <span className="text-sm font-semibold text-slate-500 uppercase tracking-wider">
             Tổng mặt hàng
           </span>
-          <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-rose-700/10 text-rose-700 font-bold">
+          <div className="inline-flex items-center justify-center min-w-[40px] px-2 h-10 rounded-lg bg-rose-700/10 text-rose-700 font-bold">
             {totalItems}
           </div>
         </div>
@@ -402,7 +420,9 @@ function OrderSummary({ totalAmount, totalItems }) {
           <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">
             Tổng hóa đơn
           </p>
-          <p className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-rose-700 to-rose-500 bg-clip-text text-transparent">
+          <p
+            className={`font-bold bg-gradient-to-r from-rose-700 to-rose-500 bg-clip-text text-transparent break-all ${totalAmount > 1000000000 ? "text-2xl md:text-3xl" : "text-3xl md:text-4xl"}`}
+          >
             {totalAmount.toLocaleString()}
           </p>
         </div>
@@ -433,12 +453,14 @@ export default function CreateOrderPage() {
 
   const [products, setProducts] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors, setErrors] = useState({});
   const [isLoadingOrderDefaults, setIsLoadingOrderDefaults] = useState(
     !readCachedOrderDefaults(),
   );
   const [productCatalog, setProductCatalog] = useState([]);
   const [customerCatalog, setCustomerCatalog] = useState([]);
   const [showProductSuggestions, setShowProductSuggestions] = useState(false);
+  const [showUnitSuggestions, setShowUnitSuggestions] = useState(false);
   const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState("PAID");
@@ -561,10 +583,21 @@ export default function CreateOrderPage() {
 
   const getCatalogSuggestions = (query) => {
     const keyword = foldText(query);
-    if (!keyword) return productCatalog.slice(0, 8);
-    return productCatalog
-      .filter((p) => foldText(p.tenSanPham).includes(keyword))
-      .slice(0, 8);
+    const pool = keyword
+      ? productCatalog.filter((p) => foldText(p.tenSanPham).includes(keyword))
+      : productCatalog;
+
+    return pool
+      .map((p) => ({
+        ...p,
+        variantKey: `${p.tenSanPham}-${p.donVi}`,
+        displayUnit: p.donVi || "",
+        displayPrice: p.donGiaBan || 0,
+        displayCost: p.giaVon || 0,
+        hasChanLeInfo: !!p.donViLon,
+        isChan: !!p.donViLon && p.donVi === p.donViLon,
+      }))
+      .slice(0, 15);
   };
 
   const getCustomerSuggestions = (query) => {
@@ -585,9 +618,9 @@ export default function CreateOrderPage() {
       ...current,
       tenSanPham: tenSanPham || matched.tenSanPham || "",
       nhomHang: matched.nhomHang || "",
-      donVi: matched.donVi || "",
-      donGiaBan: Number(matched.donGiaBan || 0),
-      giaVon: Number(matched.giaVon || 0),
+      donVi: matched.displayUnit || matched.donVi || "",
+      donGiaBan: Number(matched.displayPrice ?? matched.donGiaBan ?? 0),
+      giaVon: Number(matched.displayCost ?? matched.giaVon ?? 0),
     };
   };
 
@@ -633,21 +666,97 @@ export default function CreateOrderPage() {
       nhomHang: toTitleCase(newProduct.nhomHang),
       donVi: toTitleCase(newProduct.donVi),
     };
-    if (normalizedProduct.tenSanPham && normalizedProduct.donGiaBan > 0) {
-      setProducts([
-        ...products,
-        { ...normalizedProduct, id: Date.now().toString() },
-      ]);
-      setNewProduct({
-        id: "",
-        tenSanPham: "",
-        nhomHang: "",
-        donVi: "",
-        soLuong: 1,
-        donGiaBan: 0,
-        giaVon: 0,
-      });
+    const newErr = {};
+    if (!normalizedProduct.tenSanPham?.trim())
+      newErr.new_tenSanPham = "Chưa chọn hàng";
+
+    let maxInventory = undefined;
+    if (showInventory) {
+      const matched = getCatalogMatch(normalizedProduct.tenSanPham);
+      if (matched) {
+        const inputDonVi = String(normalizedProduct.donVi || "").trim();
+        const units = [
+          matched.donVi,
+          matched.donViLon,
+          matched.donViNho, // extra check
+        ].filter(Boolean);
+
+        const found = units.find(
+          (u) => u.toLowerCase() === inputDonVi.toLowerCase(),
+        );
+
+        if (found) {
+          normalizedProduct.donVi = found; // Smart formatting: lấy đúng format trong danh mục
+          
+          const exactMatch = productCatalog.find(
+            (p) =>
+              foldText(p.tenSanPham) === foldText(normalizedProduct.tenSanPham) &&
+              foldText(p.donVi) === foldText(found)
+          );
+          
+          if (exactMatch && exactMatch.tonKho !== undefined) {
+            maxInventory = exactMatch.tonKho;
+            if (normalizedProduct.soLuong > maxInventory) {
+               newErr.new_soLuong = `Kho chỉ còn ${maxInventory} ${found}`;
+            }
+          }
+        } else {
+          newErr.new_donVi = `Đơn vị phải là: ${[...new Set(units)].join(" hoặc ")}`;
+        }
+      }
     }
+
+    if (!normalizedProduct.soLuong || normalizedProduct.soLuong < 1)
+      newErr.new_soLuong = "Sai SL";
+    if (normalizedProduct.soLuong > 100000) newErr.new_soLuong = "Tối đa 100k";
+    if (normalizedProduct.donGiaBan <= 0) newErr.new_donGiaBan = "Sai giá";
+    if (
+      normalizedProduct.giaVon > 0 &&
+      normalizedProduct.donGiaBan > 0 &&
+      normalizedProduct.giaVon > normalizedProduct.donGiaBan
+    )
+      newErr.new_giaVon = "Giá vốn không được lớn hơn giá bán";
+
+    const isDuplicate = products.some(
+      (p) =>
+        p.tenSanPham.trim().toLowerCase() ===
+          normalizedProduct.tenSanPham.trim().toLowerCase() &&
+        p.donVi.trim().toLowerCase() ===
+          String(normalizedProduct.donVi || "").trim().toLowerCase(),
+    );
+    if (isDuplicate) {
+      newErr.new_tenSanPham = "Sản phẩm (kèm đơn vị) đã có trong đơn";
+    }
+
+    if (Object.keys(newErr).length > 0) {
+      setErrors((p) => ({ ...p, ...newErr }));
+      return;
+    }
+
+    setProducts([
+      ...products,
+      { ...normalizedProduct, tonKhoMax: maxInventory, id: Date.now().toString() },
+    ]);
+    setNewProduct({
+      id: "",
+      tenSanPham: "",
+      nhomHang: "",
+      donVi: "",
+      soLuong: 1,
+      donGiaBan: 0,
+      giaVon: 0,
+    });
+    setErrors((p) => {
+      const {
+        new_tenSanPham,
+        new_donVi,
+        new_soLuong,
+        new_donGiaBan,
+        new_giaVon,
+        ...rest
+      } = p;
+      return rest;
+    });
   };
 
   const handleRemoveProduct = (id) => {
@@ -662,10 +771,23 @@ export default function CreateOrderPage() {
     e.preventDefault();
     if (isLoadingOrderDefaults)
       return toast.error("Đang tải mã phiếu mới, vui lòng chờ...");
-    if (products.length === 0)
-      return toast.error("Vui lòng thêm ít nhất một mặt hàng");
-    if (isCustomerMode && !customerInfo.tenKhach)
-      return toast.error("Vui lòng nhập tên khách hàng");
+
+    const newErrors = {};
+    if (isCustomerMode && !customerInfo.tenKhach?.trim()) {
+      newErrors.tenKhach = "Vui lòng nhập tên khách hàng";
+    }
+    if (products.length === 0) {
+      toast.error("Vui lòng thêm ít nhất một mặt hàng");
+      return;
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      toast.error("Vui lòng kiểm tra lại thông tin");
+      return;
+    }
+
+    setErrors({});
     const normalizedOrderInfo = {
       ...orderInfo,
       soTienDaTra: 0,
@@ -689,7 +811,7 @@ export default function CreateOrderPage() {
     (sum, p) => sum + p.soLuong * p.donGiaBan,
     0,
   );
-  const totalItems = products.reduce((sum, p) => sum + p.soLuong, 0);
+  const totalItems = products.length; // Thay vì sum quantity, đếm số loại mặt hàng
   const pendingTotal = Number(pendingOrder?.totalAmount || 0);
   const isPartialOverpay =
     paymentStatus === "PARTIAL" &&
@@ -720,6 +842,32 @@ export default function CreateOrderPage() {
     }
 
     setIsSubmitting(true);
+    const savingToastId = toast.loading("Đang lưu đơn hàng...", {
+      duration: Infinity,
+    });
+    const rollbackSnapshot = {
+      products,
+      customerInfo,
+      orderInfo,
+      isCustomerMode,
+      pendingOrder,
+      paymentStatus,
+      paymentMethod,
+      partialAmount,
+    };
+
+    const restoreFromSnapshot = (snap) => {
+      setProducts(snap.products);
+      setCustomerInfo(snap.customerInfo);
+      setOrderInfo(snap.orderInfo);
+      setIsCustomerMode(snap.isCustomerMode);
+      setPendingOrder(snap.pendingOrder);
+      setPaymentStatus(snap.paymentStatus);
+      setPaymentMethod(snap.paymentMethod);
+      setPartialAmount(snap.partialAmount);
+      setShowPaymentModal(true);
+    };
+
     try {
       const statusLabel =
         paymentStatus === "DEBT"
@@ -746,31 +894,53 @@ export default function CreateOrderPage() {
         orderInfo: updatedOrderInfo,
       };
 
+      // Optimistic UI: clear form immediately so interaction feels instant.
+      closePaymentModal();
+      setProducts([]);
+      setCustomerInfo({ tenKhach: "", soDienThoai: "" });
+      setOrderInfo(createInitialOrderInfo());
+      setIsCustomerMode(false);
       const result = await createOrder(orderData);
 
       if (result?.success) {
-        toast.success(result.message || "Đơn hàng được tạo thành công!");
-        closePaymentModal();
-        setProducts([]);
-        setCustomerInfo({ tenKhach: "", soDienThoai: "" });
-        setOrderInfo(createInitialOrderInfo());
-        await loadOrderDefaults();
-        await loadProductCatalog();
-        await loadCustomerCatalog();
-        setIsCustomerMode(false);
+        toast.success(
+          result?.queued
+            ? result.message || "Đơn đã vào hàng đợi, đang xử lý trong nền."
+            : result.message || "Đơn hàng được tạo thành công!",
+          { id: savingToastId, duration: 5000 },
+        );
+        // Fire-and-forget: reload data in background without blocking UI
+        Promise.all([
+          loadOrderDefaults(),
+          loadProductCatalog(),
+          loadCustomerCatalog(),
+        ]).catch(() => {});
+        try {
+          if (!result?.queued) formatAllSheets().catch(() => {});
+        } catch (e) {}
       } else {
-        toast.error(result?.message || "Có lỗi xảy ra, vui lòng thử lại!");
+        restoreFromSnapshot(rollbackSnapshot);
+        toast.error(
+          result?.message || "Lưu đơn thất bại, dữ liệu đã được khôi phục.",
+          { id: savingToastId, duration: 5000 },
+        );
       }
     } catch (err) {
+      restoreFromSnapshot(rollbackSnapshot);
       console.error("Submit error:", err);
-      toast.error("Lỗi kết nối: " + err.message);
+      toast.error("Lỗi kết nối, dữ liệu đã được khôi phục: " + err.message, {
+        id: savingToastId,
+        duration: 5000,
+      });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const inputCls =
-    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all";
+  const inputCls = (hasError) =>
+    `w-full rounded-xl border ${
+      hasError ? "border-rose-500 ring-1 ring-rose-500/20" : "border-slate-200"
+    } bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all`;
   const customerSuggestions = getCustomerSuggestions(customerInfo.tenKhach);
 
   return (
@@ -842,8 +1012,14 @@ export default function CreateOrderPage() {
                         tenKhach: c.tenKhach || "",
                         soDienThoai: c.soDienThoai || "",
                       });
+                      if (errors.tenKhach)
+                        setErrors((p) => {
+                          const { tenKhach, ...rest } = p;
+                          return rest;
+                        });
                       setShowCustomerSuggestions(false);
                     }}
+                    errors={errors}
                   />
                 </div>
               )}
@@ -875,13 +1051,14 @@ export default function CreateOrderPage() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    Tên hàng
+                    Tên hàng <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <input
                       type="text"
                       placeholder="Ví dụ: áo phông trắng, Quần jean..."
                       value={newProduct.tenSanPham}
+                      maxLength={200}
                       onFocus={() => setShowProductSuggestions(true)}
                       onBlur={() => {
                         const titleName = toTitleCase(newProduct.tenSanPham);
@@ -894,19 +1071,44 @@ export default function CreateOrderPage() {
                         setTimeout(() => setShowProductSuggestions(false), 120);
                         const matched = getCatalogMatch(titleName);
                         if (!matched) return;
-                        setNewProduct((prev) =>
-                          applyMatchedProduct(prev, titleName, matched),
-                        );
+                        setNewProduct((prev) => {
+                          // Nếu tên đã chuẩn và đã có đơn vị (variant đã chọn), không được đè lại
+                          if (
+                            foldText(prev.tenSanPham) === foldText(titleName) &&
+                            prev.donVi
+                          ) {
+                            return prev;
+                          }
+                          return applyMatchedProduct(prev, titleName, matched);
+                        });
                       }}
                       onChange={(e) => {
                         const tenSanPham = e.target.value;
                         const matched = getCatalogMatch(tenSanPham);
-                        setNewProduct((prev) =>
-                          applyMatchedProduct(prev, tenSanPham, matched),
-                        );
+                        setNewProduct((prev) => {
+                          // Tương tự: nếu đang gõ mà tên vẫn khớp cái cũ và đã có đơn vị, đừng đè
+                          if (
+                            foldText(prev.tenSanPham) ===
+                              foldText(tenSanPham) &&
+                            prev.donVi
+                          ) {
+                            return { ...prev, tenSanPham };
+                          }
+                          return applyMatchedProduct(prev, tenSanPham, matched);
+                        });
+                        if (errors.new_tenSanPham)
+                          setErrors((p) => {
+                            const { new_tenSanPham, ...rest } = p;
+                            return rest;
+                          });
                       }}
-                      className={inputCls}
+                      className={inputCls(!!errors.new_tenSanPham)}
                     />
+                    {errors.new_tenSanPham && (
+                      <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                        {errors.new_tenSanPham}
+                      </p>
+                    )}
                     {showProductSuggestions &&
                       getCatalogSuggestions(newProduct.tenSanPham).length >
                         0 && (
@@ -914,7 +1116,9 @@ export default function CreateOrderPage() {
                           {getCatalogSuggestions(newProduct.tenSanPham).map(
                             (p) => (
                               <button
-                                key={`${p.tenSanPham}-${p.donVi}`}
+                                key={
+                                  p.variantKey || `${p.tenSanPham}-${p.donVi}`
+                                }
                                 type="button"
                                 className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-rose-50"
                                 onMouseDown={(ev) => ev.preventDefault()}
@@ -929,15 +1133,23 @@ export default function CreateOrderPage() {
                                   setShowProductSuggestions(false);
                                 }}
                               >
-                                <p className="text-sm font-semibold text-slate-800">
-                                  {p.tenSanPham}
-                                </p>
-                                <p className="text-xs text-slate-500">
-                                  {p.nhomHang || "-"} • {p.donVi || "-"} • Giá{" "}
-                                  {fmt(p.donGiaBan || 0)} • Vốn{" "}
-                                  {fmt(p.giaVon || 0)}
+                                <div className="flex items-center justify-between">
+                                  <p className="text-sm font-semibold text-slate-800">
+                                    {p.tenSanPham}
+                                  </p>
+                                  {p.hasChanLeInfo && (
+                                    <span
+                                      className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold uppercase ${p.isChan ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}
+                                    >
+                                      {p.isChan ? "Chẵn" : "Lẻ"}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-500 mt-1">
+                                  {p.nhomHang || "-"} • {p.displayUnit || "-"} •
+                                  Giá {fmt(p.displayPrice || 0)}
                                   {showInventory &&
-                                    ` • Tồn kho: ${p.tonKho || 0}`}
+                                    ` • Tồn: ${p.tonKho || 0} ${p.displayUnit}`}
                                 </p>
                               </button>
                             ),
@@ -954,8 +1166,12 @@ export default function CreateOrderPage() {
                     type="text"
                     placeholder="Nước, Bánh kẹo, Đồ đóng gói..."
                     value={newProduct.nhomHang}
+                    maxLength={50}
                     onChange={(e) =>
-                      setNewProduct({ ...newProduct, nhomHang: e.target.value })
+                      setNewProduct((prev) => ({
+                        ...prev,
+                        nhomHang: e.target.value,
+                      }))
                     }
                     onBlur={() =>
                       setNewProduct((prev) => ({
@@ -963,67 +1179,157 @@ export default function CreateOrderPage() {
                         nhomHang: toTitleCase(prev.nhomHang),
                       }))
                     }
-                    className={inputCls}
+                    className={inputCls(false)}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3 md:gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      Đơn vị
+                      Đơn vị <span className="text-rose-500">*</span>
                     </label>
-                    <input
-                      type="text"
-                      placeholder="cái, bộ, chiếc..."
-                      value={newProduct.donVi}
-                      onChange={(e) =>
-                        setNewProduct({ ...newProduct, donVi: e.target.value })
-                      }
-                      onBlur={() =>
-                        setNewProduct((prev) => ({
-                          ...prev,
-                          donVi: toTitleCase(prev.donVi),
-                        }))
-                      }
-                      className={inputCls}
-                    />
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="cái, bộ, chiếc..."
+                        value={newProduct.donVi}
+                        maxLength={20}
+                        onFocus={() => setShowUnitSuggestions(true)}
+                        onChange={(e) => {
+                          setNewProduct((prev) => ({
+                            ...prev,
+                            donVi: e.target.value,
+                          }));
+                          if (errors.new_donVi)
+                            setErrors((p) => {
+                              const { new_donVi, ...rest } = p;
+                              return rest;
+                            });
+                        }}
+                        onBlur={() => {
+                          const matched = getCatalogMatch(
+                            newProduct.tenSanPham,
+                          );
+                          setNewProduct((prev) => {
+                            const inputVal = String(prev.donVi || "").trim();
+                            if (showInventory && matched) {
+                              const found = [
+                                matched.donVi,
+                                matched.donViLon,
+                                matched.donViNho,
+                              ]
+                                .filter(Boolean)
+                                .find(
+                                  (u) =>
+                                    u.toLowerCase() === inputVal.toLowerCase(),
+                                );
+                              if (found) return { ...prev, donVi: found };
+                            }
+                            return { ...prev, donVi: toTitleCase(inputVal) };
+                          });
+                          setTimeout(() => setShowUnitSuggestions(false), 200);
+                        }}
+                        className={inputCls(!!errors.new_donVi)}
+                      />
+                      {errors.new_donVi && (
+                        <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                          {errors.new_donVi}
+                        </p>
+                      )}
+
+                      {showUnitSuggestions &&
+                        showInventory &&
+                        getCatalogMatch(newProduct.tenSanPham) && (
+                          <div className="absolute top-full left-0 right-0 z-[60] mt-2 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
+                            <div className="p-2 space-y-1">
+                              {[
+                                getCatalogMatch(newProduct.tenSanPham).donVi,
+                                getCatalogMatch(newProduct.tenSanPham).donViLon,
+                              ]
+                                .filter(Boolean)
+                                .map((u, idx) => (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => {
+                                      setNewProduct((prev) => ({
+                                        ...prev,
+                                        donVi: u,
+                                      }));
+                                      setErrors((p) => {
+                                        const { new_donVi, ...rest } = p;
+                                        return rest;
+                                      });
+                                      setShowUnitSuggestions(false);
+                                    }}
+                                    className="w-full text-left p-3 rounded-xl hover:bg-slate-50 transition-colors duration-200 text-sm font-medium text-slate-700"
+                                  >
+                                    {u}
+                                  </button>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      Số lượng
+                      Số lượng <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="number"
                       placeholder="1"
                       min="0"
                       value={newProduct.soLuong}
-                      onChange={(e) =>
-                        setNewProduct({
-                          ...newProduct,
-                          soLuong:
-                            e.target.value === ""
-                              ? ""
-                              : parseInt(e.target.value) || 0,
-                        })
-                      }
-                      onBlur={() => {
-                        if (newProduct.soLuong === "" || newProduct.soLuong < 1)
-                          setNewProduct({ ...newProduct, soLuong: 1 });
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const num = val === "" ? "" : parseInt(val) || 0;
+                        setNewProduct((prev) => ({
+                          ...prev,
+                          soLuong: num === "" ? "" : Math.min(num, 100000),
+                        }));
+                        if (errors.new_soLuong)
+                          setErrors((p) => {
+                            const { new_soLuong, ...rest } = p;
+                            return rest;
+                          });
                       }}
-                      className={inputCls}
+                      onBlur={() => {
+                        setNewProduct((prev) => {
+                          if (prev.soLuong === "" || prev.soLuong < 1)
+                            return { ...prev, soLuong: 1 };
+                          return prev;
+                        });
+                      }}
+                      className={inputCls(!!errors.new_soLuong)}
                     />
+                    {errors.new_soLuong && (
+                      <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                        {errors.new_soLuong}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    Đơn giá bán
+                    Đơn giá bán <span className="text-rose-500">*</span>
                   </label>
                   <CurrencyInput
                     value={newProduct.donGiaBan}
-                    onChange={(v) =>
-                      setNewProduct({ ...newProduct, donGiaBan: v })
-                    }
-                    className={inputCls}
+                    onChange={(v) => {
+                      setNewProduct((prev) => ({ ...prev, donGiaBan: v }));
+                      if (errors.new_donGiaBan)
+                        setErrors((p) => {
+                          const { new_donGiaBan, ...rest } = p;
+                          return rest;
+                        });
+                    }}
+                    className={inputCls(!!errors.new_donGiaBan)}
                   />
+                  {errors.new_donGiaBan && (
+                    <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                      {errors.new_donGiaBan}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-800 mb-2">
@@ -1031,11 +1337,32 @@ export default function CreateOrderPage() {
                   </label>
                   <CurrencyInput
                     value={newProduct.giaVon || 0}
-                    onChange={(v) =>
-                      setNewProduct({ ...newProduct, giaVon: v })
-                    }
-                    className={inputCls}
+                    onChange={(v) => {
+                      if (
+                        v > 0 &&
+                        newProduct.donGiaBan > 0 &&
+                        v > newProduct.donGiaBan
+                      ) {
+                        setNewProduct((prev) => ({
+                          ...prev,
+                          giaVon: prev.donGiaBan,
+                        }));
+                      } else {
+                        setNewProduct((prev) => ({ ...prev, giaVon: v }));
+                      }
+                      if (errors.new_giaVon)
+                        setErrors((p) => {
+                          const { new_giaVon, ...rest } = p;
+                          return rest;
+                        });
+                    }}
+                    className={inputCls(!!errors.new_giaVon)}
                   />
+                  {errors.new_giaVon && (
+                    <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                      {errors.new_giaVon}
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -1059,7 +1386,7 @@ export default function CreateOrderPage() {
                       Các mặt hàng trong đơn
                     </p>
                   </div>
-                  <div className="flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-xl bg-rose-700/10 text-rose-700 font-semibold">
+                  <div className="flex items-center justify-center min-w-[40px] px-2 h-10 md:h-12 rounded-xl bg-rose-700/10 text-rose-700 font-bold shadow-sm">
                     {totalItems}
                   </div>
                 </div>
@@ -1105,7 +1432,7 @@ export default function CreateOrderPage() {
                     Các mặt hàng trong đơn
                   </p>
                 </div>
-                <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-rose-700/10 text-rose-700 font-semibold">
+                <div className="flex items-center justify-center min-w-[44px] px-2 h-11 rounded-xl bg-rose-700/10 text-rose-700 font-bold shadow-sm">
                   {totalItems}
                 </div>
               </div>

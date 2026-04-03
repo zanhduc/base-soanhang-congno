@@ -58,9 +58,39 @@ if (head) {
     "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
   head.appendChild(linkFont)
 
+  // Cấu hình CSS an toàn cho iframe và mobile (100dvh thay vì 100vh)
+  const iframeGlobalStyles = `
+    ${globalStyles}
+    @supports (height: 100dvh) {
+      .h-screen { height: 100dvh !important; }
+      .min-h-screen { min-height: 100dvh !important; }
+      .max-h-screen { max-height: 100dvh !important; }
+    }
+  `
+
   const styleTag = document.createElement("style")
-  styleTag.textContent = globalStyles
+  styleTag.textContent = iframeGlobalStyles
   head.appendChild(styleTag)
+
+  // Tự động thêm cấu hình viewport chống zoom nếu chạy trong Iframe
+  try {
+    const isIframe = window.self !== window.top;
+    if (isIframe) {
+      let viewportMeta = document.querySelector('meta[name="viewport"]');
+      if (!viewportMeta) {
+        viewportMeta = document.createElement('meta');
+        viewportMeta.name = "viewport";
+        head.appendChild(viewportMeta);
+      }
+      viewportMeta.content = "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover";
+    }
+  } catch (e) {
+    // Nếu bị block catch ngoại lệ (Same-origin policy), coi như đang trong Iframe
+    let viewportMeta = document.querySelector('meta[name="viewport"]');
+    if (viewportMeta) {
+      viewportMeta.content = "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover";
+    }
+  }
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(

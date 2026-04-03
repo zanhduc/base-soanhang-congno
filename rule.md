@@ -140,7 +140,6 @@ Không để lẫn file lung tung.
 
 ## 7. Không được làm
 
-- Không viết toàn bộ logic trong `Code.js`
 - Không chỉnh trực tiếp file trong `dist/`
 - Không push base gốc lên GitHub project
 - Không commit `node_modules`
@@ -179,9 +178,4 @@ React + Business Logic mới là sản phẩm thật sự.
   - Đồng bộ đa nguồn dữ liệu
   - Tính toán tổng tiền, công nợ, trạng thái
 - Mỗi thay đổi lớn phải có checklist test nhanh trước khi merge/deploy.
-
-### 9.5 Build Gate
-- Không merge/deploy nếu build fail.
-- Không merge/deploy khi còn lỗi runtime đã biết.
-- Build pass là điều kiện tối thiểu, không thay thế kiểm thử nghiệp vụ.
 

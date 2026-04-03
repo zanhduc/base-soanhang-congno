@@ -1,92 +1,87 @@
-import { useEffect, useMemo, useRef, useState } from "react"
-import toast from "react-hot-toast"
-import { deleteOrder, getCustomerCatalog, getDebtCustomers, updateDebtCustomer } from "../api"
-
-const fmt = (n) => Number(n || 0).toLocaleString("vi-VN")
-const toNum = (v) => Number(String(v ?? "").replace(/[^\d.-]/g, "")) || 0
-
-const foldText = (v) =>
-  String(v || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .trim()
-
-const isGuestCustomer = (name) => foldText(name) === "khach ghe tham"
-
-const toIsoDate = (v) => {
-  const raw = String(v || "").trim()
-  if (!raw) return ""
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
-  const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (!m) return ""
-  return `${m[3]}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`
-}
+import { useEffect, useMemo, useRef, useState } from "react";
+import toast from "react-hot-toast";
+import {
+  deleteOrder,
+  getCustomerCatalog,
+  getSupplierCatalog,
+  getDebtCustomers,
+  updateDebtCustomer,
+  getSupplierDebts,
+  getAppSetting,
+  formatAllSheets,
+} from "../api";
+import {
+  formatMoney as fmt,
+  parseNumber as toNum,
+  normalizeText as foldText,
+  isGuestCustomer,
+  toIsoDate,
+} from "../../core/core";
 
 function MoneyInput({ value, onChange }) {
-  const [display, setDisplay] = useState(value ? fmt(value) : "")
+  const [display, setDisplay] = useState(value ? fmt(value) : "");
 
   useEffect(() => {
-    setDisplay(value ? fmt(value) : "")
-  }, [value])
+    setDisplay(value ? fmt(value) : "");
+  }, [value]);
 
   return (
     <input
       value={display}
       onChange={(e) => {
-        const digits = String(e.target.value || "").replace(/[^\d]/g, "")
-        const n = digits ? Number(digits) : 0
-        setDisplay(digits ? fmt(n) : "")
-        onChange(n)
+        const digits = String(e.target.value || "").replace(/[^\d]/g, "");
+        const n = digits ? Number(digits) : 0;
+        setDisplay(digits ? fmt(n) : "");
+        onChange(n);
       }}
       inputMode="numeric"
       className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-1.5 text-sm text-slate-800 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
     />
-  )
+  );
 }
 
 function StatusBadge({ status }) {
-  const s = foldText(status)
+  const s = foldText(status);
   if (s.includes("da thanh toan")) {
     return (
       <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
         Đã thanh toán
       </span>
-    )
+    );
   }
   if (s.includes("tra mot phan") || s.includes("tra 1 phan")) {
     return (
       <span className="inline-flex rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700">
         Trả một phần
       </span>
-    )
+    );
   }
   return (
     <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
       Nợ
     </span>
-  )
+  );
 }
 
 function StatusSelect({ value, onChange }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  const options = ["Đã thanh toán", "Trả một phần", "Nợ"]
-  const current = options.find((x) => foldText(x) === foldText(value)) || options[0]
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const options = ["Đã thanh toán", "Trả một phần", "Nợ"];
+  const current =
+    options.find((x) => foldText(x) === foldText(value)) || options[0];
 
   useEffect(() => {
     const onDocClick = (e) => {
-      if (!ref.current) return
-      if (!ref.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener("mousedown", onDocClick)
-    document.addEventListener("touchstart", onDocClick)
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("touchstart", onDocClick);
     return () => {
-      document.removeEventListener("mousedown", onDocClick)
-      document.removeEventListener("touchstart", onDocClick)
-    }
-  }, [])
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("touchstart", onDocClick);
+    };
+  }, []);
 
   return (
     <div ref={ref} className="relative">
@@ -96,7 +91,9 @@ function StatusSelect({ value, onChange }) {
         className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 pr-10 text-left text-sm text-slate-800 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
       >
         {current}
-        <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}>
+        <span
+          className={`absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+        >
           ▾
         </span>
       </button>
@@ -107,8 +104,8 @@ function StatusSelect({ value, onChange }) {
               key={opt}
               type="button"
               onClick={() => {
-                onChange(opt)
-                setOpen(false)
+                onChange(opt);
+                setOpen(false);
               }}
               className={`block w-full rounded-lg px-3 py-2 text-left text-sm ${
                 foldText(opt) === foldText(current)
@@ -122,34 +119,30 @@ function StatusSelect({ value, onChange }) {
         </div>
       )}
     </div>
-  )
+  );
 }
 
 function FilterStatusSelect({ value, onChange }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  const options = [
-    "ALL",
-    "Đã thanh toán",
-    "Trả một phần",
-    "Nợ",
-  ]
-  const current = options.find((x) => foldText(x) === foldText(value)) || options[0]
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const options = ["ALL", "Đã thanh toán", "Trả một phần", "Nợ"];
+  const current =
+    options.find((x) => foldText(x) === foldText(value)) || options[0];
 
   useEffect(() => {
     const onDocClick = (e) => {
-      if (!ref.current) return
-      if (!ref.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener("mousedown", onDocClick)
-    document.addEventListener("touchstart", onDocClick)
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("touchstart", onDocClick);
     return () => {
-      document.removeEventListener("mousedown", onDocClick)
-      document.removeEventListener("touchstart", onDocClick)
-    }
-  }, [])
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("touchstart", onDocClick);
+    };
+  }, []);
 
-  const renderLabel = (opt) => (opt === "ALL" ? "Tất cả trạng thái" : opt)
+  const renderLabel = (opt) => (opt === "ALL" ? "Tất cả trạng thái" : opt);
 
   return (
     <div ref={ref} className="relative">
@@ -159,7 +152,9 @@ function FilterStatusSelect({ value, onChange }) {
         className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 pr-10 text-left text-sm text-slate-800 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
       >
         {renderLabel(current)}
-        <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}>
+        <span
+          className={`absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+        >
           ▾
         </span>
       </button>
@@ -170,8 +165,8 @@ function FilterStatusSelect({ value, onChange }) {
               key={opt}
               type="button"
               onClick={() => {
-                onChange(opt)
-                setOpen(false)
+                onChange(opt);
+                setOpen(false);
               }}
               className={`block w-full rounded-lg px-3 py-2 text-left text-sm ${
                 foldText(opt) === foldText(current)
@@ -185,7 +180,7 @@ function FilterStatusSelect({ value, onChange }) {
         </div>
       )}
     </div>
-  )
+  );
 }
 
 function EditDebtModal({
@@ -197,127 +192,225 @@ function EditDebtModal({
   onSave,
   onDelete,
   onSettle,
-  customerCatalog,
+  catalog = [],
+  isSupplier = false,
 }) {
   const [form, setForm] = useState(() => ({
     maPhieuOriginal: row.maPhieu,
-    tenKhach: row.tenKhach || "",
+    name: isSupplier ? row.nhaCungCap || "" : row.tenKhach || "",
     soDienThoai: String(row.soDienThoai || ""),
     maPhieu: row.maPhieu || "",
-    ngayBan: toIsoDate(row.ngayBan),
+    date: toIsoDate(isSupplier ? row.ngayNhap : row.ngayBan),
     tienNo: toNum(row.tienNo),
     trangThai: String(row.trangThai || "Nợ"),
     ghiChu: String(row.ghiChu || "-"),
-  }))
-  const [showCustomerSuggest, setShowCustomerSuggest] = useState(false)
+  }));
+  const [errors, setErrors] = useState({});
+  const [showSuggest, setShowSuggest] = useState(false);
 
-  const getCustomerSuggestions = (query) => {
-    const q = foldText(query)
-    if (!q) return (customerCatalog || []).filter((c) => !isGuestCustomer(c.tenKhach)).slice(0, 8)
-    return (customerCatalog || [])
+  const validate = () => {
+    const newErrors = {};
+    if (!form.name?.trim()) {
+      newErrors.name = isSupplier
+        ? "Tên nhà cung cấp không được để trống"
+        : "Tên khách hàng không được để trống";
+    }
+    if (!form.maPhieu?.trim()) {
+      newErrors.maPhieu = "Mã phiếu không được để trống";
+    }
+    if (!form.date) {
+      newErrors.date = "Ngày không được để trống";
+    }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSaveClick = () => {
+    if (validate()) {
+      onSave(form);
+    } else {
+      toast.error("Vui lòng kiểm tra lại thông tin");
+    }
+  };
+
+  const getSuggestions = (query) => {
+    const q = foldText(query);
+    if (!q) return (catalog || []).slice(0, 8);
+    return (catalog || [])
       .filter(
         (c) =>
-          !isGuestCustomer(c.tenKhach) &&
-          (foldText(c.tenKhach).includes(q) || foldText(c.soDienThoai).includes(q)),
+          foldText(isSupplier ? c.tenNCC : c.tenKhach).includes(q) ||
+          foldText(c.soDienThoai).includes(q),
       )
-      .slice(0, 8)
-  }
+      .slice(0, 8);
+  };
 
   return (
-    <div className="fixed inset-0 z-[9800] bg-slate-900/45 p-3 md:p-6" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[9800] bg-slate-900/45 p-3 md:p-6"
+      onClick={onClose}
+    >
       <div
         className="mx-auto max-w-2xl rounded-2xl bg-white shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 md:px-5">
+        <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 md:px-5 text-left">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="text-base md:text-lg font-bold text-slate-900">Sửa công nợ khách hàng</h3>
-            <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100">
+            <h3 className="text-base md:text-lg font-bold text-slate-900">
+              {isSupplier
+                ? "Sửa công nợ nhà cung cấp"
+                : "Sửa công nợ khách hàng"}
+            </h3>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100"
+            >
               Đóng
             </button>
           </div>
         </div>
 
-        <div className="p-4 md:p-5 space-y-3">
+        <div className="p-4 md:p-5 space-y-3 text-left">
           <div className="grid gap-3 md:grid-cols-2">
             <div className="relative">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Tên khách hàng</label>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {isSupplier ? "Tên nhà cung cấp" : "Tên khách hàng"}
+              </label>
               <input
-                value={form.tenKhach}
+                value={form.name}
                 onChange={(e) => {
-                  setForm((p) => ({ ...p, tenKhach: e.target.value }))
-                  setShowCustomerSuggest(true)
+                  setForm((p) => ({ ...p, name: e.target.value }));
+                  if (errors.name) setErrors((p) => ({ ...p, name: "" }));
+                  setShowSuggest(true);
                 }}
-                onFocus={() => setShowCustomerSuggest(true)}
-                onBlur={() => setTimeout(() => setShowCustomerSuggest(false), 120)}
-                placeholder="Tên khách hàng"
-                className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-1.5 text-sm text-slate-800 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
+                onFocus={() => setShowSuggest(true)}
+                onBlur={() => setTimeout(() => setShowSuggest(false), 120)}
+                placeholder={isSupplier ? "Tên nhà cung cấp" : "Tên khách hàng"}
+                className={`w-full h-11 rounded-xl border bg-slate-50/60 px-3 py-1.5 text-sm text-slate-800 focus:bg-white focus:outline-none focus:ring-2 transition-all ${
+                  errors.name
+                    ? "border-rose-500 focus:ring-rose-500/20"
+                    : "border-slate-200 focus:border-rose-700 focus:ring-rose-700/20"
+                }`}
               />
-              {showCustomerSuggest && getCustomerSuggestions(form.tenKhach).length > 0 && (
+              {errors.name && (
+                <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                  {errors.name}
+                </p>
+              )}
+              {showSuggest && getSuggestions(form.name).length > 0 && (
                 <div className="absolute z-30 mt-1 w-full rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
-                  {getCustomerSuggestions(form.tenKhach).map((c) => (
+                  {getSuggestions(form.name).map((c) => (
                     <button
-                      key={`${c.tenKhach}-${c.soDienThoai}`}
+                      key={`${isSupplier ? c.tenNCC : c.tenKhach}-${c.soDienThoai}`}
                       type="button"
                       onMouseDown={(ev) => ev.preventDefault()}
                       onClick={() => {
                         setForm((p) => ({
                           ...p,
-                          tenKhach: c.tenKhach || "",
+                          name: (isSupplier ? c.tenNCC : c.tenKhach) || "",
                           soDienThoai: String(c.soDienThoai || ""),
-                        }))
-                        setShowCustomerSuggest(false)
+                        }));
+                        setShowSuggest(false);
                       }}
                       className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-rose-50"
                     >
-                      <p className="text-sm font-semibold text-slate-800">{c.tenKhach}</p>
-                      <p className="text-xs text-slate-500">{c.soDienThoai || "-"}</p>
+                      <p className="text-sm font-semibold text-slate-800">
+                        {isSupplier ? c.tenNCC : c.tenKhach}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {c.soDienThoai || "-"}
+                      </p>
                     </button>
                   ))}
                 </div>
               )}
             </div>
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Số điện thoại</label>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Số điện thoại
+              </label>
               <input
                 value={form.soDienThoai}
-                onChange={(e) => setForm((p) => ({ ...p, soDienThoai: e.target.value }))}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, soDienThoai: e.target.value }))
+                }
                 placeholder="Số điện thoại"
                 className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-1.5 text-sm text-slate-800 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Mã phiếu</label>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Mã phiếu
+              </label>
               <input
                 value={form.maPhieu}
-                onChange={(e) => setForm((p) => ({ ...p, maPhieu: e.target.value }))}
+                onChange={(e) => {
+                  setForm((p) => ({ ...p, maPhieu: e.target.value }));
+                  if (errors.maPhieu) setErrors((p) => ({ ...p, maPhieu: "" }));
+                }}
                 placeholder="Mã phiếu"
-                className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-1.5 text-sm text-slate-800 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
+                className={`w-full h-11 rounded-xl border bg-slate-50/60 px-3 py-1.5 text-sm text-slate-800 focus:bg-white focus:outline-none focus:ring-2 transition-all ${
+                  errors.maPhieu
+                    ? "border-rose-500 focus:ring-rose-500/20"
+                    : "border-slate-200 focus:border-rose-700 focus:ring-rose-700/20"
+                }`}
+                readOnly
               />
+              {errors.maPhieu && (
+                <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                  {errors.maPhieu}
+                </p>
+              )}
             </div>
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Ngày bán</label>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {isSupplier ? "Ngày nhập" : "Ngày bán"}
+              </label>
               <input
                 type="date"
                 lang="en-GB"
-                value={form.ngayBan}
-                onChange={(e) => setForm((p) => ({ ...p, ngayBan: e.target.value }))}
-                className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 pr-10 py-1.5 text-sm text-slate-800 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
+                value={form.date}
+                onChange={(e) => {
+                  setForm((p) => ({ ...p, date: e.target.value }));
+                  if (errors.date) setErrors((p) => ({ ...p, date: "" }));
+                }}
+                className={`w-full h-11 rounded-xl border bg-slate-50/60 px-3 pr-10 py-1.5 text-sm text-slate-800 focus:bg-white focus:outline-none focus:ring-2 transition-all ${
+                  errors.date
+                    ? "border-rose-500 focus:ring-rose-500/20"
+                    : "border-slate-200 focus:border-rose-700 focus:ring-rose-700/20"
+                }`}
               />
+              {errors.date && (
+                <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                  {errors.date}
+                </p>
+              )}
             </div>
+            {!foldText(form.trangThai).includes("da thanh toan") && (
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Tiền nợ
+                </label>
+                <MoneyInput
+                  value={form.tienNo}
+                  onChange={(v) => setForm((p) => ({ ...p, tienNo: v }))}
+                />
+              </div>
+            )}
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Tiền nợ</label>
-              <MoneyInput value={form.tienNo} onChange={(v) => setForm((p) => ({ ...p, tienNo: v }))} />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Trạng thái</label>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Trạng thái
+              </label>
               <StatusSelect
                 value={form.trangThai}
                 onChange={(next) =>
                   setForm((p) => ({
                     ...p,
                     trangThai: next,
-                    tienNo: foldText(next).includes("da thanh toan") ? 0 : p.tienNo,
+                    tienNo: foldText(next).includes("da thanh toan")
+                      ? 0
+                      : p.tienNo,
                   }))
                 }
               />
@@ -325,18 +418,22 @@ function EditDebtModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Ghi chú</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Ghi chú
+            </label>
             <textarea
               rows={3}
               value={form.ghiChu}
-              onChange={(e) => setForm((p) => ({ ...p, ghiChu: e.target.value }))}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, ghiChu: e.target.value }))
+              }
               placeholder="Ghi chú"
               className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2 text-sm text-slate-800 resize-none focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
             />
           </div>
         </div>
 
-        <div className="sticky bottom-0 bg-white border-t border-slate-200 p-4 flex gap-2">
+        <div className="sticky bottom-0 bg-white border-t border-slate-200 p-4 flex justify-end gap-2">
           <button
             type="button"
             disabled={saving || deleting || settling}
@@ -345,23 +442,43 @@ function EditDebtModal({
           >
             {deleting ? "Đang xóa..." : "Xóa"}
           </button>
-          <button
+
+          {/* <button
             type="button"
-            disabled={saving || deleting || settling || foldText(form.trangThai).includes("da thanh toan")}
+            disabled={
+              saving ||
+              deleting ||
+              settling ||
+              foldText(form.trangThai).includes("da thanh toan")
+            }
             onClick={() => onSettle(form)}
             className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 disabled:opacity-60"
           >
-            {settling ? "Đang thu..." : "Thu công nợ"}
-          </button>
-          <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-700">
+            {settling
+              ? isSupplier
+                ? "Đang trả..."
+                : "Đang thu..."
+              : isSupplier
+                ? "Trả công nợ"
+                : "Thu công nợ"}
+          </button> */}
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-slate-200 px-6 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
             Hủy
           </button>
+
           <button
             type="button"
             disabled={saving || deleting || settling}
-            onClick={() => onSave(form)}
-            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold text-white ${
-              saving ? "bg-slate-400" : "bg-gradient-to-r from-rose-700 to-rose-500"
+            onClick={handleSaveClick}
+            className={`min-w-[120px] rounded-xl px-6 py-2.5 text-sm font-semibold text-white ${
+              saving
+                ? "bg-slate-400"
+                : "bg-gradient-to-r from-rose-700 to-rose-500"
             }`}
           >
             {saving ? "Đang lưu..." : "Lưu thay đổi"}
@@ -369,195 +486,389 @@ function EditDebtModal({
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 export default function DebtPage() {
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [settlingKey, setSettlingKey] = useState("")
-  const [rows, setRows] = useState([])
-  const [query, setQuery] = useState("")
-  const [statusFilter, setStatusFilter] = useState("ALL")
-  const [editing, setEditing] = useState(null)
-  const [deleteTarget, setDeleteTarget] = useState(null)
-  const [customerCatalog, setCustomerCatalog] = useState([])
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [settlingKey, setSettlingKey] = useState("");
+  const [rows, setRows] = useState([]);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [editing, setEditing] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [customerCatalog, setCustomerCatalog] = useState([]);
+  const [supplierCatalog, setSupplierCatalog] = useState([]);
+  const [activeTab, setActiveTab] = useState("customers");
+  const [showSupplierTab, setShowSupplierTab] = useState(false);
+  const [settleConfirmTarget, setSettleConfirmTarget] = useState(null);
 
   const loadDebts = async () => {
-    setLoading(true)
+    setLoading(true);
     try {
-      const res = await getDebtCustomers()
-      if (res?.success && Array.isArray(res.data)) {
-        setRows(res.data.filter((r) => !isGuestCustomer(r.tenKhach)))
+      if (activeTab === "customers") {
+        const res = await getDebtCustomers();
+        if (res?.success && Array.isArray(res.data)) {
+          setRows(res.data.filter((r) => !isGuestCustomer(r.tenKhach)));
+        } else {
+          setRows([]);
+          if (res?.message) toast.error(res.message);
+        }
       } else {
-        setRows([])
-        if (res?.message) toast.error(res.message)
+        const res = await getSupplierDebts();
+        if (res?.success && Array.isArray(res.data)) {
+          setRows(res.data);
+        } else {
+          setRows([]);
+          if (res?.message) toast.error(res.message);
+        }
       }
     } catch (e) {
-      setRows([])
-      toast.error("Không tải được dữ liệu công nợ")
+      setRows([]);
+      toast.error("Không tải được dữ liệu công nợ");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const loadCustomerCatalog = async () => {
+  const loadCatalogs = async () => {
     try {
-      const res = await getCustomerCatalog()
-      if (res?.success && Array.isArray(res.data)) {
-        setCustomerCatalog(res.data)
-      } else {
-        setCustomerCatalog([])
+      const [cusRes, supRes] = await Promise.all([
+        getCustomerCatalog(),
+        getSupplierCatalog(),
+      ]);
+      if (cusRes?.success && Array.isArray(cusRes.data))
+        setCustomerCatalog(cusRes.data);
+      if (supRes?.success && Array.isArray(supRes.data))
+        setSupplierCatalog(supRes.data);
+    } catch (e) {}
+  };
+
+  const checkInventorySetting = async () => {
+    try {
+      const res = await getAppSetting("enable_inventory");
+      if (res?.success) {
+        setShowSupplierTab(res.data === "true");
       }
-    } catch (e) {
-      setCustomerCatalog([])
-    }
-  }
+    } catch (e) {}
+  };
 
   useEffect(() => {
-    loadDebts()
-    loadCustomerCatalog()
-  }, [])
+    loadDebts();
+  }, [activeTab]);
+
+  useEffect(() => {
+    loadCatalogs();
+    checkInventorySetting();
+
+    const handler = (e) => setShowSupplierTab(Boolean(e.detail));
+    window.addEventListener("inventory_setting_changed", handler);
+    return () =>
+      window.removeEventListener("inventory_setting_changed", handler);
+  }, []);
 
   const filteredRows = useMemo(() => {
-    const q = foldText(query)
+    const q = foldText(query);
+    const isSup = activeTab === "suppliers";
     return rows.filter((r) => {
-      if (isGuestCustomer(r.tenKhach)) return false
-      if (statusFilter !== "ALL" && foldText(r.trangThai) !== foldText(statusFilter)) return false
-      if (!q) return true
-      const text = `${r.tenKhach} ${r.soDienThoai} ${r.maPhieu} ${r.ngayBan} ${r.ghiChu}`
-      return foldText(text).includes(q)
-    })
-  }, [rows, query, statusFilter])
+      if (!isSup && isGuestCustomer(r.tenKhach)) return false;
+      if (
+        statusFilter !== "ALL" &&
+        foldText(r.trangThai) !== foldText(statusFilter)
+      )
+        return false;
+      if (!q) return true;
+      const name = isSup ? r.nhaCungCap : r.tenKhach;
+      const date = isSup ? r.ngayNhap : r.ngayBan;
+      const text = `${name} ${r.soDienThoai} ${r.maPhieu} ${date} ${r.ghiChu}`;
+      return foldText(text).includes(q);
+    });
+  }, [rows, query, statusFilter, activeTab]);
 
   const totalDebt = useMemo(
-    () => filteredRows.reduce((sum, r) => sum + Math.max(toNum(r.tienNo), 0), 0),
+    () =>
+      filteredRows.reduce((sum, r) => sum + Math.max(toNum(r.tienNo), 0), 0),
     [filteredRows],
-  )
+  );
 
   const debtCustomerCount = useMemo(() => {
-    const seen = new Set()
+    const seen = new Set();
     for (let i = 0; i < filteredRows.length; i++) {
-      const r = filteredRows[i]
-      if (toNum(r.tienNo) <= 0) continue
-      const key = `${foldText(r.tenKhach)}||${String(r.soDienThoai || "").replace(/[^\d]/g, "")}`
-      seen.add(key)
+      const r = filteredRows[i];
+      if (toNum(r.tienNo) <= 0) continue;
+      const key = `${foldText(r.tenKhach)}||${String(r.soDienThoai || "").replace(/[^\d]/g, "")}`;
+      seen.add(key);
     }
-    return seen.size
-  }, [filteredRows])
+    return seen.size;
+  }, [filteredRows]);
 
   const canSettleRow = (r) => {
-    const key = foldText(r.trangThai)
-    return key.includes("no") || key.includes("tra mot phan") || toNum(r.tienNo) > 0
-  }
+    const key = foldText(r.trangThai);
+    return (
+      key.includes("no") || key.includes("tra mot phan") || toNum(r.tienNo) > 0
+    );
+  };
 
   const handleSave = async (form) => {
-    const maPhieu = String(form.maPhieu || "").trim()
-    if (!maPhieu) return toast.error("Mã phiếu không được để trống")
-    const tenKhach = String(form.tenKhach || "").trim()
-    if (!tenKhach) return toast.error("Tên khách không được để trống")
+    const maPhieu = String(form.maPhieu || "").trim();
+    if (!maPhieu) return toast.error("Mã phiếu không được để trống");
+    const name = String(form.name || "").trim();
+    if (!name)
+      return toast.error(
+        activeTab === "suppliers"
+          ? "Tên nhà cung cấp không được để trống"
+          : "Tên khách không được để trống",
+      );
 
-    setSaving(true)
+    // Snapshot for rollback
+    const rowsSnapshot = rows;
+    const editingSnapshot = editing;
+    const isSup = activeTab === "suppliers";
+
+    // Optimistic UI: update row + close modal
+    setRows((prev) =>
+      prev.map((r) =>
+        String(r.maPhieu || "").trim() === String(form.maPhieuOriginal || "").trim()
+          ? {
+              ...r,
+              ...(isSup ? { nhaCungCap: name, ngayNhap: form.date } : { tenKhach: name, ngayBan: form.date }),
+              soDienThoai: String(form.soDienThoai || "").trim(),
+              tienNo: foldText(form.trangThai).includes("da thanh toan") ? 0 : Math.max(toNum(form.tienNo), 0),
+              trangThai: form.trangThai,
+              ghiChu: String(form.ghiChu || "-").trim() || "-",
+            }
+          : r,
+      ),
+    );
+    setEditing(null);
+
+    setSaving(true);
+    const toastId = toast.loading("Đang lưu công nợ...", { duration: Infinity });
+
     try {
-      const res = await updateDebtCustomer({
+      const payload = {
         maPhieuOriginal: form.maPhieuOriginal,
-        tenKhach,
         soDienThoai: String(form.soDienThoai || "").trim(),
         maPhieu,
-        ngayBan: form.ngayBan || "",
         tienNo: Math.max(toNum(form.tienNo), 0),
         trangThai: form.trangThai,
         ghiChu: String(form.ghiChu || "-").trim() || "-",
-      })
-      if (!res?.success) {
-        toast.error(res?.message || "Cập nhật công nợ thất bại")
-        return
+      };
+
+      let res;
+      if (isSup) {
+        res = await updateSupplierDebt({
+          ...payload,
+          nhaCungCap: name,
+          ngayNhap: form.date || "",
+        });
+      } else {
+        res = await updateDebtCustomer({
+          ...payload,
+          tenKhach: name,
+          ngayBan: form.date || "",
+        });
       }
-      toast.success(res.message || "Cập nhật công nợ thành công")
-      setEditing(null)
-      await loadDebts()
+
+      if (!res?.success) {
+        setRows(rowsSnapshot);
+        setEditing(editingSnapshot);
+        toast.error(res?.message || "Cập nhật công nợ thất bại, đã khôi phục.", { id: toastId, duration: 5000 });
+        return;
+      }
+      toast.success(res.message || "Cập nhật công nợ thành công", { id: toastId, duration: 5000 });
+      try { formatAllSheets().catch(() => {}); } catch (e) {}
+      loadDebts().catch(() => {});
     } catch (e) {
-      toast.error("Cập nhật công nợ thất bại")
+      setRows(rowsSnapshot);
+      setEditing(editingSnapshot);
+      toast.error("Cập nhật công nợ thất bại, đã khôi phục.", { id: toastId, duration: 5000 });
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   const handleDeleteRequest = () => {
-    if (!editing?.maPhieu) return
-    setDeleteTarget(editing)
-  }
+    if (!editing?.maPhieu) return;
+    setDeleteTarget(editing);
+  };
 
   const confirmDeleteOrder = async () => {
-    const key = String(deleteTarget?.maPhieu || "").trim()
-    if (!key) return
-    setDeleting(true)
+    const key = String(deleteTarget?.maPhieu || "").trim();
+    if (!key) return;
+
+    // Snapshot for rollback
+    const rowsSnapshot = rows;
+    const editingSnapshot = editing;
+
+    // Optimistic UI: remove from list immediately
+    setRows((prev) => prev.filter((r) => String(r.maPhieu || "").trim() !== key));
+    setDeleteTarget(null);
+    setEditing(null);
+
+    setDeleting(true);
+    const toastId = toast.loading("Đang xóa hóa đơn...", { duration: Infinity });
+
     try {
-      const res = await deleteOrder(key)
+      const res = await deleteOrder(key);
       if (res?.success) {
-        toast.success(res.message || "Đã xóa hóa đơn")
-        setDeleteTarget(null)
-        setEditing(null)
-        await loadDebts()
+        toast.success(res.message || "Đã xóa hóa đơn", { id: toastId, duration: 5000 });
+        try { formatAllSheets().catch(() => {}); } catch (e) {}
+        loadDebts().catch(() => {});
       } else {
-        toast.error(res?.message || "Xóa thất bại")
+        setRows(rowsSnapshot);
+        setEditing(editingSnapshot);
+        toast.error(res?.message || "Xóa thất bại, đã khôi phục.", { id: toastId, duration: 5000 });
       }
     } catch (e) {
-      toast.error("Xóa thất bại")
+      setRows(rowsSnapshot);
+      setEditing(editingSnapshot);
+      toast.error("Xóa thất bại, đã khôi phục.", { id: toastId, duration: 5000 });
     } finally {
-      setDeleting(false)
+      setDeleting(false);
     }
-  }
+  };
 
   const handleQuickSettle = async (target) => {
-    const maPhieuKey = String(target?.maPhieuOriginal || target?.maPhieu || "").trim()
-    if (!maPhieuKey) return toast.error("Thiếu mã phiếu")
-    setSettlingKey(maPhieuKey)
+    const maPhieuKey = String(
+      target?.maPhieuOriginal || target?.maPhieu || "",
+    ).trim();
+    if (!maPhieuKey) return toast.error("Thiếu mã phiếu");
+
+    // Snapshot for rollback
+    const rowsSnapshot = rows;
+    const editingSnapshot = editing;
+    const isSup = activeTab === "suppliers";
+
+    // Optimistic UI: mark as paid immediately
+    setRows((prev) =>
+      prev.map((r) =>
+        String(r.maPhieu || "").trim() === maPhieuKey
+          ? { ...r, tienNo: 0, trangThai: "Đã thanh toán" }
+          : r,
+      ),
+    );
+    if (editing && String(editing.maPhieu || "").trim() === maPhieuKey)
+      setEditing(null);
+
+    setSettlingKey(maPhieuKey);
+    const toastId = toast.loading(
+      isSup ? "Đang trả nợ..." : "Đang thu công nợ...",
+      { duration: Infinity },
+    );
+
     try {
-      const res = await updateDebtCustomer({
+      const payload = {
         maPhieuOriginal: maPhieuKey,
-        tenKhach: String(target.tenKhach || "").trim(),
         soDienThoai: String(target.soDienThoai || "").trim(),
         maPhieu: String(target.maPhieu || maPhieuKey).trim() || maPhieuKey,
-        ngayBan: target.ngayBan || "",
         tienNo: 0,
         trangThai: "Đã thanh toán",
         ghiChu: String(target.ghiChu || "-").trim() || "-",
-      })
-      if (res?.success) {
-        toast.success(res.message || "Đã thu công nợ thành công")
-        if (editing && String(editing.maPhieu || "").trim() === maPhieuKey) setEditing(null)
-        await loadDebts()
+      };
+
+      let res;
+      if (isSup) {
+        res = await updateSupplierDebt({
+          ...payload,
+          nhaCungCap: String(target.nhaCungCap || "").trim(),
+          ngayNhap: target.ngayNhap || "",
+        });
       } else {
-        toast.error(res?.message || "Thu công nợ thất bại")
+        res = await updateDebtCustomer({
+          ...payload,
+          tenKhach: String(target.tenKhach || "").trim(),
+          ngayBan: target.ngayBan || "",
+        });
+      }
+
+      if (res?.success) {
+        toast.success(
+          res.message ||
+            (isSup ? "Đã trả nợ thành công" : "Đã thu công nợ thành công"),
+          { id: toastId, duration: 5000 },
+        );
+        try { formatAllSheets().catch(() => {}); } catch (e) {}
+        loadDebts().catch(() => {});
+      } else {
+        setRows(rowsSnapshot);
+        setEditing(editingSnapshot);
+        toast.error(res?.message || "Thao tác thất bại, đã khôi phục.", { id: toastId, duration: 5000 });
       }
     } catch (e) {
-      toast.error("Thu công nợ thất bại")
+      setRows(rowsSnapshot);
+      setEditing(editingSnapshot);
+      toast.error("Thao tác thất bại, đã khôi phục.", { id: toastId, duration: 5000 });
     } finally {
-      setSettlingKey("")
+      setSettlingKey("");
     }
-  }
+  };
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-50 to-rose-50/30">
       <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 md:py-8 pb-24">
         <div className="mb-6 md:mb-8">
-          <h1 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight">Quản lý công nợ</h1>
-          <p className="mt-2 text-sm md:text-base text-slate-500">Theo dõi tiền nợ và chỉnh sửa thông tin khách hàng trực tiếp.</p>
+          <h1 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight">
+            Quản lý công nợ
+          </h1>
+          <p className="mt-2 text-sm md:text-base text-slate-500">
+            Theo dõi tiền nợ và chỉnh sửa thông tin khách hàng trực tiếp.
+          </p>
         </div>
+
+        {showSupplierTab && (
+          <div className="flex p-1 bg-slate-200/50 rounded-2xl mb-6 max-w-sm">
+            <button
+              onClick={() => setActiveTab("customers")}
+              className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${
+                activeTab === "customers"
+                  ? "bg-white text-rose-700 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Khách hàng Nợ
+            </button>
+            <button
+              onClick={() => setActiveTab("suppliers")}
+              className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${
+                activeTab === "suppliers"
+                  ? "bg-white text-rose-700 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Nợ Nhà cung cấp
+            </button>
+          </div>
+        )}
 
         <section className="grid gap-3 md:grid-cols-2 mb-4">
           <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tổng khách/đơn</p>
-            <p className="mt-1 text-2xl font-black text-slate-900">{filteredRows.length}</p>
-            <p className="mt-1 text-xs font-semibold text-rose-700">Số khách nợ: {debtCustomerCount}</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {activeTab === "suppliers"
+                ? "Tổng nhà cung cấp/đơn"
+                : "Tổng khách/đơn"}
+            </p>
+            <p className="mt-1 text-2xl font-black text-slate-900">
+              {filteredRows.length}
+            </p>
+            <p className="mt-1 text-xs font-semibold text-rose-700">
+              {activeTab === "suppliers" ? "Số NCC nợ: " : "Số khách nợ: "}
+              {debtCustomerCount}
+            </p>
           </div>
           <div className="rounded-2xl border border-rose-200 bg-rose-50/50 px-4 py-3 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Tổng tiền nợ</p>
-            <p className="mt-1 text-2xl font-black text-rose-700">{fmt(totalDebt)}</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">
+              Tổng tiền nợ
+            </p>
+            <p className="mt-1 text-2xl font-black text-rose-700">
+              {fmt(totalDebt)}
+            </p>
             {statusFilter !== "ALL" && (
-              <p className="mt-1 text-xs font-semibold text-rose-700">Trạng thái: {statusFilter}</p>
+              <p className="mt-1 text-xs font-semibold text-rose-700">
+                Trạng thái: {statusFilter}
+              </p>
             )}
           </div>
         </section>
@@ -567,7 +878,7 @@ export default function DebtPage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Tìm theo khách, số điện thoại, mã phiếu..."
+              placeholder="Tìm theo khách, số điện thoại, mã phiếu, ngày..."
               className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-1.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
             />
             <FilterStatusSelect
@@ -585,46 +896,95 @@ export default function DebtPage() {
         </section>
 
         {loading ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">Đang tải dữ liệu công nợ...</div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
+            Đang tải dữ liệu công nợ...
+          </div>
         ) : filteredRows.length === 0 ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">Không có dữ liệu phù hợp.</div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
+            Không có dữ liệu phù hợp.
+          </div>
         ) : (
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full min-w-[920px] text-sm">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
-                    <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide">Khách hàng</th>
-                    <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide">SĐT</th>
-                    <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide">Ngày bán</th>
-                    <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide">Mã phiếu</th>
-                    <th className="px-3 py-2.5 text-right text-xs font-bold uppercase tracking-wide">Tiền nợ</th>
-                    <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide">Trạng thái</th>
-                    <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide">Ghi chú</th>
-                    <th className="px-3 py-2.5 text-right text-xs font-bold uppercase tracking-wide">Thao tác</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide">
+                      {activeTab === "suppliers"
+                        ? "Nhà cung cấp"
+                        : "Khách hàng"}
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide">
+                      SĐT
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide">
+                      {activeTab === "suppliers" ? "Ngày nhập" : "Ngày bán"}
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide">
+                      Mã phiếu
+                    </th>
+                    <th className="px-3 py-2.5 text-right text-xs font-bold uppercase tracking-wide">
+                      Tiền nợ
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide">
+                      Trạng thái
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide">
+                      Ghi chú
+                    </th>
+                    <th className="px-3 py-2.5 text-right text-xs font-bold uppercase tracking-wide">
+                      Thao tác
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredRows.map((r, idx) => (
-                    <tr key={`${r.maPhieu}-${idx}`} className="border-t border-slate-100">
-                      <td className="px-3 py-2 text-slate-800 font-semibold">{r.tenKhach || "-"}</td>
-                      <td className="px-3 py-2 text-slate-600">{r.soDienThoai || "-"}</td>
-                      <td className="px-3 py-2 text-slate-600">{r.ngayBan || "-"}</td>
-                      <td className="px-3 py-2 text-slate-800 font-semibold">{r.maPhieu || "-"}</td>
-                      <td className="px-3 py-2 text-right font-bold text-rose-700">{fmt(r.tienNo || 0)}</td>
+                    <tr
+                      key={`${r.maPhieu}-${idx}`}
+                      className="border-t border-slate-100"
+                    >
+                      <td className="px-3 py-2 text-slate-800 font-semibold">
+                        {(activeTab === "suppliers"
+                          ? r.nhaCungCap
+                          : r.tenKhach) || "-"}
+                      </td>
+                      <td className="px-3 py-2 text-slate-600">
+                        {r.soDienThoai || "-"}
+                      </td>
+                      <td className="px-3 py-2 text-slate-600">
+                        {(activeTab === "suppliers" ? r.ngayNhap : r.ngayBan) ||
+                          "-"}
+                      </td>
+                      <td className="px-3 py-2 text-slate-800 font-semibold">
+                        {r.maPhieu || "-"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-bold text-rose-700">
+                        {fmt(r.tienNo || 0)}
+                      </td>
                       <td className="px-3 py-2">
                         <StatusBadge status={r.trangThai} />
                       </td>
-                      <td className="px-3 py-2 text-slate-600">{r.ghiChu || "-"}</td>
+                      <td className="px-3 py-2 text-slate-600">
+                        {r.ghiChu || "-"}
+                      </td>
                       <td className="px-3 py-2 text-right">
                         <div className="inline-flex items-center gap-1.5">
                           <button
                             type="button"
-                            onClick={() => handleQuickSettle(r)}
-                            disabled={!canSettleRow(r) || settlingKey === String(r.maPhieu || "").trim()}
+                            onClick={() => setSettleConfirmTarget(r)}
+                            disabled={
+                              !canSettleRow(r) ||
+                              settlingKey === String(r.maPhieu || "").trim()
+                            }
                             className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 disabled:opacity-50"
                           >
-                            {settlingKey === String(r.maPhieu || "").trim() ? "Đang thu..." : "Thu nợ"}
+                            {settlingKey === String(r.maPhieu || "").trim()
+                              ? activeTab === "suppliers"
+                                ? "Đang trả..."
+                                : "Đang thu..."
+                              : activeTab === "suppliers"
+                                ? "Trả nợ"
+                                : "Thu nợ"}
                           </button>
                           <button
                             type="button"
@@ -646,24 +1006,45 @@ export default function DebtPage() {
                 <article key={`${r.maPhieu}-m-${idx}`} className="p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="font-bold text-slate-900">{r.tenKhach || "-"}</p>
+                      <p className="font-bold text-slate-900">
+                        {(activeTab === "suppliers"
+                          ? r.nhaCungCap
+                          : r.tenKhach) || "-"}
+                      </p>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        {r.maPhieu || "-"} | {r.ngayBan || "-"}
+                        {r.maPhieu || "-"} |{" "}
+                        {(activeTab === "suppliers" ? r.ngayNhap : r.ngayBan) ||
+                          "-"}
                       </p>
                     </div>
                     <StatusBadge status={r.trangThai} />
                   </div>
-                  <p className="text-xs text-slate-500 mt-2">SĐT: {r.soDienThoai || "-"}</p>
-                  <p className="text-sm font-bold text-rose-700 mt-1">Nợ: {fmt(r.tienNo || 0)}</p>
-                  <p className="text-xs text-slate-600 mt-1">Ghi chú: {r.ghiChu || "-"}</p>
+                  <p className="text-xs text-slate-500 mt-2">
+                    SĐT: {r.soDienThoai || "-"}
+                  </p>
+                  <p className="text-sm font-bold text-rose-700 mt-1">
+                    Nợ: {fmt(r.tienNo || 0)}
+                  </p>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Ghi chú: {r.ghiChu || "-"}
+                  </p>
                   <div className="mt-2 flex justify-end gap-1.5">
                     <button
                       type="button"
-                      onClick={() => handleQuickSettle(r)}
-                      disabled={!canSettleRow(r) || settlingKey === String(r.maPhieu || "").trim()}
+                      onClick={() => setSettleConfirmTarget(r)}
+                      disabled={
+                        !canSettleRow(r) ||
+                        settlingKey === String(r.maPhieu || "").trim()
+                      }
                       className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 disabled:opacity-50"
                     >
-                      {settlingKey === String(r.maPhieu || "").trim() ? "Đang thu..." : "Thu nợ"}
+                      {settlingKey === String(r.maPhieu || "").trim()
+                        ? activeTab === "suppliers"
+                          ? "Đang trả..."
+                          : "Đang thu..."
+                        : activeTab === "suppliers"
+                          ? "Trả nợ"
+                          : "Thu nợ"}
                     </button>
                     <button
                       type="button"
@@ -690,19 +1071,97 @@ export default function DebtPage() {
           onSave={handleSave}
           onDelete={handleDeleteRequest}
           onSettle={handleQuickSettle}
-          customerCatalog={customerCatalog}
+          catalog={
+            activeTab === "suppliers" ? supplierCatalog : customerCatalog
+          }
+          isSupplier={activeTab === "suppliers"}
         />
       )}
 
-      {deleteTarget && (
-        <div className="fixed inset-0 z-[9900] bg-slate-900/45 p-4" onClick={() => (deleting ? null : setDeleteTarget(null))}>
-          <div className="mx-auto mt-[18vh] w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-bold text-slate-900">Xác nhận xóa hóa đơn</h3>
+      {settleConfirmTarget && (
+        <div
+          className="fixed inset-0 z-[9900] bg-slate-900/45 p-4"
+          onClick={() => (settlingKey ? null : setSettleConfirmTarget(null))}
+        >
+          <div
+            className="mx-auto mt-[18vh] w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-bold text-slate-900">
+              {activeTab === "suppliers"
+                ? "Xác nhận trả nợ"
+                : "Xác nhận thu nợ"}
+            </h3>
             <p className="mt-2 text-sm text-slate-600">
-              Bạn sắp xóa hóa đơn <span className="font-semibold text-slate-900">{deleteTarget.maPhieu}</span>. Thao tác này sẽ cập nhật cả
-              `DON_HANG` và `KHACH`.
+              {activeTab === "suppliers" ? "Trả toàn bộ" : "Thu toàn bộ"} công
+              nợ của{" "}
+              <span className="font-semibold text-slate-900">
+                {activeTab === "suppliers"
+                  ? settleConfirmTarget.nhaCungCap
+                  : settleConfirmTarget.tenKhach}
+              </span>{" "}
+              — phiếu{" "}
+              <span className="font-semibold">
+                {settleConfirmTarget.maPhieu}
+              </span>
+              ?
             </p>
-            <p className="mt-1 text-xs text-rose-600">Hành động này không thể hoàn tác.</p>
+            <p className="mt-1 text-xs text-rose-600">
+              Trạng thái sẽ chuyển thành &quot;Đã thanh toán&quot; và tiền nợ về
+              0.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                disabled={Boolean(settlingKey)}
+                onClick={() => setSettleConfirmTarget(null)}
+                className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-60"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(settlingKey)}
+                onClick={async () => {
+                  const target = settleConfirmTarget;
+                  setSettleConfirmTarget(null);
+                  await handleQuickSettle(target);
+                }}
+                className="flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {settlingKey
+                  ? "Đang xử lý..."
+                  : activeTab === "suppliers"
+                    ? "Xác nhận trả"
+                    : "Xác nhận thu"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-[9900] bg-slate-900/45 p-4"
+          onClick={() => (deleting ? null : setDeleteTarget(null))}
+        >
+          <div
+            className="mx-auto mt-[18vh] w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-bold text-slate-900">
+              Xác nhận xóa hóa đơn
+            </h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Bạn sắp xóa hóa đơn{" "}
+              <span className="font-semibold text-slate-900">
+                {deleteTarget.maPhieu}
+              </span>
+              . Thao tác này sẽ cập nhật cả `DON_HANG` và `KHACH`.
+            </p>
+            <p className="mt-1 text-xs text-rose-600">
+              Hành động này không thể hoàn tác.
+            </p>
             <div className="mt-4 flex gap-2">
               <button
                 type="button"
@@ -725,5 +1184,5 @@ export default function DebtPage() {
         </div>
       )}
     </main>
-  )
+  );
 }

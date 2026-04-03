@@ -31,6 +31,9 @@ const MOCK_PRODUCTS = [
     donVi: "Chai",
     donGiaBan: 10000,
     giaVon: 6000,
+    donViLon: "Thùng",
+    quyCach: 24,
+    tonKho: 240,
   },
   {
     tenSanPham: "Mì gói Hảo Hảo",
@@ -38,6 +41,9 @@ const MOCK_PRODUCTS = [
     donVi: "Gói",
     donGiaBan: 5000,
     giaVon: 3500,
+    donViLon: "Thùng",
+    quyCach: 30,
+    tonKho: 150,
   },
   {
     tenSanPham: "Bánh Oreo",
@@ -45,6 +51,9 @@ const MOCK_PRODUCTS = [
     donVi: "Gói",
     donGiaBan: 15000,
     giaVon: 10000,
+    donViLon: "Hộp",
+    quyCach: 12,
+    tonKho: 60,
   },
   {
     tenSanPham: "Sữa tươi Vinamilk 180ml",
@@ -52,6 +61,9 @@ const MOCK_PRODUCTS = [
     donVi: "Hộp",
     donGiaBan: 8000,
     giaVon: 5500,
+    donViLon: "Lốc",
+    quyCach: 4,
+    tonKho: 40,
   },
   {
     tenSanPham: "Coca Cola lon 330ml",
@@ -59,6 +71,9 @@ const MOCK_PRODUCTS = [
     donVi: "Lon",
     donGiaBan: 12000,
     giaVon: 8000,
+    donViLon: "Thùng",
+    quyCach: 24,
+    tonKho: 48,
   },
 ];
 
@@ -637,9 +652,9 @@ const getTodayInputDate = () => {
   return local.toISOString().split("T")[0];
 };
 
-const incrementOrderCode = (value) => {
+const incrementOrderCode = (value, defaultVal) => {
   const raw = String(value ?? "").trim();
-  if (!raw) return "01";
+  if (!raw) return defaultVal || "01";
 
   const m = raw.match(/^(.*?)(\d+)$/);
   if (!m) return raw + "1";
@@ -714,7 +729,7 @@ const getNextOrderFormDefaults = async () => {
   return {
     success: true,
     data: {
-      maPhieu: incrementOrderCode(mockLatestOrderCode),
+      maPhieu: incrementOrderCode(mockLatestOrderCode, "DH00001"),
       ngayBan: getTodayInputDate(),
     },
   };
@@ -725,7 +740,7 @@ const getNextInventoryReceiptDefaults = async () => {
   return {
     success: true,
     data: {
-      maPhieu: incrementOrderCode(mockLatestReceiptCode),
+      maPhieu: incrementOrderCode(mockLatestReceiptCode, "PN00001"),
       ngayNhap: getTodayInputDate(),
     },
   };
@@ -757,6 +772,8 @@ const updateProductCatalogItem = async (payload) => {
   const donVi = String(p.donVi || "").trim();
   const donGiaBan = Math.max(Number(p.donGiaBan || 0), 0);
   const giaVon = Math.max(Number(p.giaVon || 0), 0);
+  const donViLon = String(p.donViLon || "").trim();
+  const quyCach = Math.max(Number(p.quyCach || 1), 1);
 
   if (!originalTenSanPham || !originalDonVi) {
     return {
@@ -802,6 +819,8 @@ const updateProductCatalogItem = async (payload) => {
       donVi,
       donGiaBan,
       giaVon,
+      donViLon,
+      quyCach,
     };
     MOCK_PRODUCTS.splice(sourceIdx, 1);
   } else {
@@ -812,6 +831,8 @@ const updateProductCatalogItem = async (payload) => {
       donVi,
       donGiaBan,
       giaVon,
+      donViLon,
+      quyCach,
     };
   }
   return {
@@ -828,6 +849,8 @@ const createProductCatalogItem = async (payload) => {
   const donVi = String(p.donVi || "").trim();
   const donGiaBan = Math.max(Number(p.donGiaBan || 0), 0);
   const giaVon = Math.max(Number(p.giaVon || 0), 0);
+  const donViLon = String(p.donViLon || "").trim();
+  const quyCach = Math.max(Number(p.quyCach || 1), 1);
 
   if (!tenSanPham)
     return {
@@ -854,7 +877,16 @@ const createProductCatalogItem = async (payload) => {
       message: "Sản phẩm với đơn vị này đã tồn tại (Mock)",
     };
 
-  MOCK_PRODUCTS.push({ tenSanPham, nhomHang, donVi, donGiaBan, giaVon });
+  MOCK_PRODUCTS.push({
+    tenSanPham,
+    nhomHang,
+    donVi,
+    donGiaBan,
+    giaVon,
+    donViLon,
+    quyCach,
+    tonKho: 0,
+  });
   return {
     success: true,
     message: "Đã thêm sản phẩm thành công! (Mock)",
@@ -1056,30 +1088,75 @@ const createInventoryReceipt = async (payload) => {
 
   if (payload && payload.products && payload.receiptInfo) {
     payload.products.forEach((p) => {
+      // Giả lập lịch sử nhập (Cấu trúc 12 cột mới: Ngày, NCC, Phiếu, TênSP, Nhóm, SL, ĐV, Giá, Thành tiền, Tổng, Ghi chú, Trạng thái)
       MOCK_RECEIPT_HISTORY.unshift({
         maPhieu: payload.receiptInfo.maPhieu,
         ngayNhap: payload.receiptInfo.ngayNhap,
         nhaCungCap: payload.receiptInfo.nhaCungCap,
-        maSanPham: p.maSanPham || "",
         tenSanPham: p.tenSanPham,
         nhomHang: p.nhomHang || "",
-        hanSuDung: p.hanSuDung || "",
-        donVi: p.donVi,
         soLuong: Number(p.soLuong || 0),
-        donGiaNhap: Number(p.giaNhap ?? p.donGiaNhap ?? 0),
-        thanhTien:
-          Number(p.soLuong || 0) * Number(p.giaNhap ?? p.donGiaNhap ?? 0),
+        donVi: p.donViChan,
+        giaNhap: Number(p.giaNhapChan || 0),
+        thanhTien: Number(p.soLuong || 0) * Number(p.giaNhapChan || 0),
         tongTienPhieu: payload.receiptInfo.tongTienPhieu || 0,
         ghiChu: payload.receiptInfo.ghiChu || "",
-        trangThai: payload.receiptInfo.trangThai || "",
+        trangThai: payload.receiptInfo.trangThai || "Đã thanh toán",
       });
 
+      // Thêm vào công nợ NCC nếu là Nợ hoặc Trả một phần (giả lập)
+      const trangThai = payload.receiptInfo.trangThai || "Đã thanh toán";
+      const maPhieu = payload.receiptInfo.maPhieu || "MOCK-NP";
+      const nhaCungCap = payload.receiptInfo.nhaCungCap || "NCC Mới";
+      const soDienThoai = payload.receiptInfo.soDienThoai || "";
+      const ngayNhap = payload.receiptInfo.ngayNhap || new Date().toISOString().split('T')[0];
+      const tongTienPhieu = payload.receiptInfo.tongTienPhieu || 0;
+      const soTienDaTra = Number(payload.receiptInfo.soTienDaTra || 0);
+
+      let tienNo = 0;
+      if (trangThai === "Nợ") tienNo = tongTienPhieu;
+      else if (trangThai === "Trả một phần") tienNo = Math.max(tongTienPhieu - soTienDaTra, 0);
+
+      if (tienNo > 0 || trangThai !== "Đã thanh toán") {
+        MOCK_SUPPLIER_DEBTS.push({
+          nhaCungCap,
+          ngayNhap,
+          soDienThoai,
+          maPhieu,
+          tienNo,
+          trangThai,
+          ghiChu: payload.receiptInfo.ghiChu || "-"
+        });
+      }
+
+      // Tìm sản phẩm lẻ trong catalog để cập nhật tồn lẻ và giá vốn lẻ
       const prodIdx = MOCK_PRODUCTS.findIndex(
-        (mp) => mp.tenSanPham === p.tenSanPham && mp.donVi === p.donVi,
+        (mp) =>
+          foldText(mp.tenSanPham) === foldText(p.tenSanPham) &&
+          foldText(mp.donVi) === foldText(p.donViLe),
       );
+      
+      const quyDoi = Number(p.quyDoi || 1);
+      const slLeThem = Number(p.soLuong || 0) * quyDoi;
+      const giaVonLe = Number(p.giaNhapChan || 0) / quyDoi;
+
       if (prodIdx >= 0) {
-        MOCK_PRODUCTS[prodIdx].tonKho =
-          (MOCK_PRODUCTS[prodIdx].tonKho || 0) + Number(p.soLuong || 0);
+        MOCK_PRODUCTS[prodIdx].tonKho = (MOCK_PRODUCTS[prodIdx].tonKho || 0) + slLeThem;
+        MOCK_PRODUCTS[prodIdx].giaVon = giaVonLe;
+        MOCK_PRODUCTS[prodIdx].donViLon = p.donViChan;
+        MOCK_PRODUCTS[prodIdx].quyCach = quyDoi;
+      } else {
+        // Tự tạo mới nếu chưa có (như logic syncProductCatalog_ của GAS)
+        MOCK_PRODUCTS.push({
+          tenSanPham: p.tenSanPham,
+          nhomHang: p.nhomHang,
+          donVi: p.donViLe,
+          donGiaBan: 0,
+          giaVon: giaVonLe,
+          donViLon: p.donViChan,
+          quyCach: quyDoi,
+          tonKho: slLeThem
+        });
       }
     });
   }
@@ -1264,6 +1341,7 @@ const call = async (fnName, ...args) => {
   if (fnName === "deleteProductCatalogItem")
     return deleteProductCatalogItem(args[0]);
   if (fnName === "getCustomerCatalog") return getCustomerCatalog();
+  if (fnName === "getSupplierCatalog") return getSupplierCatalog();
   if (fnName === "getDebtCustomers") return getDebtCustomers();
   if (fnName === "updateDebtCustomer") return updateDebtCustomer(args[0]);
   if (fnName === "settleAllDebtCustomers") return settleAllDebtCustomers();
@@ -1278,8 +1356,110 @@ const call = async (fnName, ...args) => {
   if (fnName === "getReceiptHistory") return getReceiptHistory();
   if (fnName === "getAppSetting") return getAppSetting(args[0]);
   if (fnName === "setAppSetting") return setAppSetting(args[0]);
+  if (fnName === "getInventorySuggestions") return getInventorySuggestions();
+  if (fnName === "getSupplierDebts") return getSupplierDebts();
+  if (fnName === "updateSupplierDebt") return updateSupplierDebt(args[0]);
+  if (fnName === "formatAllSheets") return { success: true, message: "Mock formatting done" };
 
   return { success: false, message: `Hàm ${fnName} chưa được mock.` };
+};
+
+const MOCK_SUPPLIER_DEBTS = [
+  {
+    nhaCungCap: "Nhà cung cấp Aqua",
+    ngayNhap: "01/10/2023",
+    soDienThoai: "0901234567",
+    maPhieu: "NH001",
+    tienNo: 5000000,
+    trangThai: "Nợ",
+    ghiChu: "Nợ tiền nước"
+  },
+  {
+    nhaCungCap: "Đại lý bia",
+    ngayNhap: "05/10/2023",
+    soDienThoai: "0912345678",
+    maPhieu: "NH002",
+    tienNo: 2000000,
+    trangThai: "Trả một phần",
+    ghiChu: "Thanh toán trước 1 ít"
+  }
+];
+
+const getSupplierDebts = async () => {
+  await sleep(200);
+  return { success: true, data: [...MOCK_SUPPLIER_DEBTS] };
+};
+
+const updateSupplierDebt = async (payload) => {
+  await sleep(400);
+  const maPhieuOriginal = String(payload.maPhieuOriginal || payload.maPhieu || "").trim();
+  const idx = MOCK_SUPPLIER_DEBTS.findIndex(d => d.maPhieu === maPhieuOriginal);
+  if (idx < 0) return { success: false, message: "Không tìm thấy công nợ NCC (Mock)" };
+
+  let tienNo = Number(payload.tienNo || 0);
+  if (payload.trangThai === "Đã thanh toán") tienNo = 0;
+
+  MOCK_SUPPLIER_DEBTS[idx] = {
+    ...MOCK_SUPPLIER_DEBTS[idx],
+    nhaCungCap: payload.nhaCungCap || MOCK_SUPPLIER_DEBTS[idx].nhaCungCap,
+    ngayNhap: payload.ngayNhap || MOCK_SUPPLIER_DEBTS[idx].ngayNhap,
+    soDienThoai: payload.soDienThoai || MOCK_SUPPLIER_DEBTS[idx].soDienThoai,
+    maPhieu: payload.maPhieu || MOCK_SUPPLIER_DEBTS[idx].maPhieu,
+    tienNo,
+    trangThai: payload.trangThai || MOCK_SUPPLIER_DEBTS[idx].trangThai,
+    ghiChu: payload.ghiChu || MOCK_SUPPLIER_DEBTS[idx].ghiChu
+  };
+
+  return { success: true, message: "Cập nhật công nợ NCC thành công! (Mock)" };
+};
+
+const getSupplierCatalog = async () => {
+  await sleep(150);
+  return {
+    success: true,
+    data: [
+      { tenNCC: "Nhà cung cấp Aqua", soDienThoai: "0901234567" },
+      { tenNCC: "Đại lý bia", soDienThoai: "0912345678" }
+    ]
+  };
+};
+
+const getInventorySuggestions = async () => {
+  await sleep(150);
+  // Mô phỏng lấy dữ liệu từ MOCK_PRODUCTS và MOCK_RECEIPT_HISTORY
+  const suggestionsMap = {};
+  
+  // Từ Products (Master)
+  MOCK_PRODUCTS.forEach(p => {
+    const key = `${foldText(p.tenSanPham)}||${foldText(p.donVi)}`;
+    suggestionsMap[key] = {
+      tenSanPham: p.tenSanPham,
+      nhomHang: p.nhomHang,
+      donViChan: p.donViLon || p.donVi,
+      donViLe: p.donVi,
+      quyDoi: p.quyCach || 1,
+      giaNhapChan: (p.giaVon || 0) * (p.quyCach || 1),
+      source: 'MASTER'
+    };
+  });
+
+  // Từ Lịch sử nhập (có thể có giá nhập khác hoặc đơn vị khác)
+  MOCK_RECEIPT_HISTORY.forEach(r => {
+    const key = `${foldText(r.tenSanPham)}||${foldText(r.donVi)}`;
+    if (!suggestionsMap[key] || suggestionsMap[key].source === 'MASTER') {
+      suggestionsMap[key] = {
+        tenSanPham: r.tenSanPham,
+        nhomHang: r.nhomHang,
+        donViChan: r.donVi,
+        donViLe: suggestionsMap[key]?.donViLe || '',
+        quyDoi: suggestionsMap[key]?.quyDoi || 1,
+        giaNhapChan: r.donGiaNhap || r.giaNhap || 0,
+        source: 'HISTORY'
+      };
+    }
+  });
+
+  return { success: true, data: Object.values(suggestionsMap) };
 };
 
 export const localAdapter = {
@@ -1297,6 +1477,7 @@ export const localAdapter = {
   createProductCatalogItem,
   deleteProductCatalogItem,
   getCustomerCatalog,
+  getSupplierCatalog,
   getDebtCustomers,
   updateDebtCustomer,
   settleAllDebtCustomers,
@@ -1308,6 +1489,10 @@ export const localAdapter = {
   deleteOrder,
   getInventory,
   getReceiptHistory,
+  getInventorySuggestions,
+  getSupplierDebts,
+  updateSupplierDebt,
   getAppSetting,
   setAppSetting,
+  formatAllSheets: async () => call("formatAllSheets"),
 };
