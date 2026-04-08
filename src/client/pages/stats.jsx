@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getOrderHistory } from "../api";
 import toast from "react-hot-toast";
-import { formatMoney as fmt, parseNumber as toNum, normalizeText as foldText, toLocalIso, getStatusCode, toIsoDate, calculateStats, formatShortDate, startOfWeek } from "../../core/core";
+import {
+  formatMoney as fmt,
+  parseNumber as toNum,
+  normalizeText as foldText,
+  toLocalIso,
+  getStatusCode,
+  toIsoDate,
+  calculateStats,
+  formatShortDate,
+  startOfWeek,
+} from "../../core/core";
 
 const buildSparkPath = (values, width, height) => {
   if (!values.length) return "";
@@ -126,7 +136,6 @@ const formatScaled = (value, scale) => {
   return formatted;
 };
 
-
 function PillSelect({
   value,
   options,
@@ -209,6 +218,7 @@ export default function StatsPage() {
   );
   const [trendYear, setTrendYear] = useState(() => new Date().getFullYear());
   const [isDesktop, setIsDesktop] = useState(true);
+  const [topProductsPeriod, setTopProductsPeriod] = useState("all");
 
   useEffect(() => {
     setIsDesktop(window.innerWidth >= 768);
@@ -258,25 +268,31 @@ export default function StatsPage() {
     }
   }, [availableYears, trendYear]);
 
-  const stats = useMemo(() => calculateStats({
-    sourceOrders,
-    trendMode,
-    trendWeekPreset,
-    trendQuarter,
-    trendYear,
-    customFrom,
-    customTo,
-    isDesktop,
-  }), [
-    sourceOrders,
-    trendMode,
-    trendWeekPreset,
-    trendQuarter,
-    trendYear,
-    customFrom,
-    customTo,
-    isDesktop,
-  ]);
+  const stats = useMemo(
+    () =>
+      calculateStats({
+        sourceOrders,
+        trendMode,
+        trendWeekPreset,
+        trendQuarter,
+        trendYear,
+        customFrom,
+        customTo,
+        isDesktop,
+        topProductsPeriod,
+      }),
+    [
+      sourceOrders,
+      trendMode,
+      trendWeekPreset,
+      trendQuarter,
+      trendYear,
+      customFrom,
+      customTo,
+      isDesktop,
+      topProductsPeriod,
+    ],
+  );
 
   const periodMax = Math.max(...stats.periodRevenue, ...stats.periodProfit, 1);
   const periodScale = getScaleConfig([
@@ -578,11 +594,24 @@ export default function StatsPage() {
             </section>
 
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <h2 className="text-sm md:text-base font-bold text-slate-800">
-                  Top sản phẩm theo doanh thu
+                  Top sản phẩm bán chạy theo doanh thu
                 </h2>
-                <span className="text-xs text-slate-400">Top 6</span>
+                <div className="flex justify-start sm:justify-end">
+                  <PillSelect
+                    value={topProductsPeriod}
+                    onChange={(val) => setTopProductsPeriod(val)}
+                    options={[
+                      { value: "week", label: "1 tuần qua" },
+                      { value: "month", label: "1 tháng qua" },
+                      { value: "year", label: "1 năm qua" },
+                      { value: "all", label: "Tất cả" },
+                    ]}
+                    buttonClassName="min-w-[100px] justify-center !py-1 !text-xs !bg-slate-50 !border-slate-200 hover:bg-slate-100 !text-slate-600 focus:ring-slate-200"
+                    dropdownAlign="left"
+                  />
+                </div>{" "}
               </div>
               <div className="mt-4 space-y-3">
                 {stats.topProducts.length === 0 && (
@@ -590,11 +619,11 @@ export default function StatsPage() {
                 )}
                 {stats.topProducts.map((p) => (
                   <div key={`${p.tenSanPham}-${p.donVi}`} className="space-y-1">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-semibold text-slate-800">
+                    <div className="flex items-center justify-between text-sm gap-2">
+                      <span className="font-semibold text-slate-800 flex-1 truncate">
                         {p.tenSanPham}
                       </span>
-                      <span className="text-rose-700 font-bold">
+                      <span className="text-rose-700 font-bold whitespace-nowrap">
                         {fmt(p.value)}
                       </span>
                     </div>
@@ -607,7 +636,7 @@ export default function StatsPage() {
                       />
                     </div>
                     <div className="text-[11px] text-slate-500">
-                      {p.donVi || "-"}
+                      {p.qty} {p.donVi?.toLowerCase() || ""}
                     </div>
                   </div>
                 ))}

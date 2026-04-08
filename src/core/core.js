@@ -305,6 +305,7 @@ export const calculateStats = ({
   customFrom,
   customTo,
   isDesktop,
+  topProductsPeriod = "all",
 }) => {
   const revenue = sourceOrders.reduce(
     (sum, o) => sum + parseNumber(o.tongHoaDon),
@@ -562,20 +563,43 @@ export const calculateStats = ({
   const ordersDelta = pctChange(curOrders, prevOrders);
 
   const productMap = {};
+  
+  const todayDate = new Date();
+  let filterDate = null;
+  if (topProductsPeriod === "week") {
+    filterDate = new Date(todayDate);
+    filterDate.setDate(todayDate.getDate() - 7);
+  } else if (topProductsPeriod === "month") {
+    filterDate = new Date(todayDate);
+    filterDate.setMonth(todayDate.getMonth() - 1);
+  } else if (topProductsPeriod === "year") {
+    filterDate = new Date(todayDate);
+    filterDate.setFullYear(todayDate.getFullYear() - 1);
+  }
+
+  const filterIso = filterDate ? toLocalIso(filterDate) : null;
+
   sourceOrders.forEach((o) => {
+    const iso = toIsoDate(o.ngayBan);
+    if (filterIso && iso && iso < filterIso) return;
+
     (o.products || []).forEach((p) => {
       const key = `${p.tenSanPham}||${p.donVi || ""}`;
-      const lineTotal = parseNumber(p.soLuong) * parseNumber(p.donGiaBan);
-      productMap[key] = (productMap[key] || 0) + lineTotal;
+      const qty = parseNumber(p.soLuong);
+      const lineTotal = qty * parseNumber(p.donGiaBan);
+      if (!productMap[key]) {
+        productMap[key] = { value: 0, qty: 0 };
+      }
+      productMap[key].value += lineTotal;
+      productMap[key].qty += qty;
     });
   });
   const topProducts = Object.entries(productMap)
-    .map(([key, value]) => {
+    .map(([key, data]) => {
       const [tenSanPham, donVi] = key.split("||");
-      return { tenSanPham, donVi, value };
+      return { tenSanPham, donVi, value: data.value, qty: data.qty };
     })
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 6);
+    .sort((a, b) => b.value - a.value);
 
   return {
     revenue,

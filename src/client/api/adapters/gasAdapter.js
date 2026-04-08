@@ -39,6 +39,15 @@ function doGet(e) {
   if (params.printPdf) {
     return buildReceiptPdf_(String(params.printPdf || "").trim());
   }
+  
+  if (params.sw === "1") {
+    var swCode = 
+      "self.addEventListener('install', function(e) { self.skipWaiting(); });" +
+      "self.addEventListener('activate', function(e) { e.waitUntil(self.clients.claim()); });" +
+      "self.addEventListener('fetch', function(e) { });";
+    return ContentService.createTextOutput(swCode).setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+
   return HtmlService.createHtmlOutputFromFile("index")
     .setTitle("Soạn Hàng - Công Nợ")
     .addMetaTag(
@@ -506,6 +515,35 @@ function buildProductKey_(tenSanPham, donVi) {
   );
 }
 
+function setImageHyperlink_(sheet, row, col, url) {
+  var cell = sheet.getRange(row, col);
+  if (!url) {
+    cell.setValue("");
+    return;
+  }
+  try {
+    var fullUrl = String(url).trim();
+    if (fullUrl.indexOf("://") < 0) fullUrl = "https://" + fullUrl;
+    var richText = SpreadsheetApp.newRichTextValue()
+      .setText("ảnh sản phẩm")
+      .setLinkUrl(fullUrl)
+      .build();
+    cell.setRichTextValue(richText);
+  } catch (e) {
+    cell.setValue(url);
+  }
+}
+
+function getImageUrlFromRichText_(richTextValue, fallbackText) {
+  if (richTextValue) {
+    try {
+      var linkUrl = richTextValue.getLinkUrl();
+      if (linkUrl) return String(linkUrl).trim();
+    } catch (e) {}
+  }
+  return String(fallbackText || (richTextValue ? richTextValue.getText() : "") || "").trim();
+}
+
 function getLastDataRowByCol_(sheet, col, dataStartRow) {
   var lastRow = sheet.getLastRow();
   if (lastRow < dataStartRow) return dataStartRow - 1;
@@ -587,20 +625,25 @@ function syncProductCatalog_(ss, products) {
   var existingByKey = {};
 
   if (lastDataRow >= dataStartRow) {
-    // B:F = TEN SAN PHAM | NHOM HANG | DON VI | GIA | GIA VON
+    // B:G = TEN SAN PHAM | ANH SAN PHAM | NHOM HANG | DON VI | GIA | GIA VON
+    var numRows = lastDataRow - dataStartRow + 1;
     var existing = sheetSP
-      .getRange(dataStartRow, 2, lastDataRow - dataStartRow + 1, 5)
+      .getRange(dataStartRow, 2, numRows, 6)
       .getValues();
+    var richTexts = sheetSP
+      .getRange(dataStartRow, 3, numRows, 1)
+      .getRichTextValues();
     for (var i = 0; i < existing.length; i++) {
       var row = existing[i];
       var tenSanPham = String(row[0] || "").trim();
-      var donVi = String(row[2] || "").trim();
+      var donVi = String(row[3] || "").trim();
       if (!tenSanPham || !donVi) continue;
       existingByKey[buildProductKey_(tenSanPham, donVi)] = {
         row: dataStartRow + i,
-        nhomHang: String(row[1] || "").trim(),
-        donGiaBan: parseMoneyNumber_(row[3]),
-        giaVon: parseMoneyNumber_(row[4]),
+        anhSanPham: getImageUrlFromRichText_(richTexts[i][0], row[1]),
+        nhomHang: String(row[2] || "").trim(),
+        donGiaBan: parseMoneyNumber_(row[4]),
+        giaVon: parseMoneyNumber_(row[5]),
         donViLon: "", // Default empty as sheet no longer has them
         quyCach: 0,
       };
@@ -616,6 +659,7 @@ function syncProductCatalog_(ss, products) {
     if (!ten || !dv) continue;
     incomingByKey[buildProductKey_(ten, dv)] = {
       tenSanPham: ten,
+      anhSanPham: String(p.anhSanPham || "").trim(),
       nhomHang: String(p.nhomHang || "").trim(),
       donVi: dv,
       donGiaBan: parseMoneyNumber_(p.donGiaBan),
@@ -653,22 +697,30 @@ function syncProductCatalog_(ss, products) {
       var changedGroup =
         normalizeProductKeyPart_(matched.nhomHang || "") !==
         normalizeProductKeyPart_(incomingProduct.nhomHang || "");
+      var changedImage =
+        incomingProduct.anhSanPham && incomingProduct.anhSanPham !== matched.anhSanPham;
+
       var changedMulti =
         matched.donViLon !== incomingProduct.donViLon ||
         Math.abs((matched.quyCach || 0) - (incomingProduct.quyCach || 0)) >
           0.0001;
 
-      if (changedPrice || changedCost || changedGroup) {
-        sheetSP
-          .getRange(matched.row, 3, 1, 4)
-          .setValues([
-            [
-              incomingProduct.nhomHang || "",
-              incomingProduct.donVi || "",
-              finalDonGiaBan,
-              finalGiaVon,
-            ],
-          ]);
+      if (changedPrice || changedCost || changedGroup || changedImage) {
+        if (changedPrice || changedCost || changedGroup) {
+          sheetSP
+            .getRange(matched.row, 4, 1, 4)
+            .setValues([
+              [
+                incomingProduct.nhomHang || "",
+                incomingProduct.donVi || "",
+                finalDonGiaBan,
+                finalGiaVon,
+              ],
+            ]);
+        }
+        if (changedImage) {
+          setImageHyperlink_(sheetSP, matched.row, 3, incomingProduct.anhSanPham);
+        }
 
         var isInventoryEnabled =
           PropertiesService.getScriptProperties().getProperty(
@@ -696,6 +748,7 @@ function syncProductCatalog_(ss, products) {
       // Thêm mới nếu chưa có key name+unit (bao gồm case cùng tên nhưng khác đơn vị).
       inserts.push([
         incomingProduct.tenSanPham,
+        incomingProduct.anhSanPham || "",
         incomingProduct.nhomHang || "",
         incomingProduct.donVi,
         incomingProduct.donGiaBan || 0,
@@ -721,10 +774,15 @@ function syncProductCatalog_(ss, products) {
       dataStartRow,
       appendStartRow,
       inserts.length,
-      Math.max(6, sheetSP.getLastColumn()),
+      Math.max(7, sheetSP.getLastColumn()),
     );
 
-    sheetSP.getRange(appendStartRow, 2, inserts.length, 5).setValues(inserts);
+    sheetSP.getRange(appendStartRow, 2, inserts.length, 6).setValues(inserts);
+    for (var idx = 0; idx < inserts.length; idx++) {
+      if (inserts[idx][1]) {
+        setImageHyperlink_(sheetSP, appendStartRow + idx, 3, inserts[idx][1]);
+      }
+    }
     inserted = inserts.length;
     updateSTT_(sheetSP, dataStartRow);
 
@@ -741,17 +799,17 @@ function syncProductCatalog_(ss, products) {
         var r = inserts[i];
         var existKho = findKhoRowByName_(sheetKho, 3, r[0]);
         if (!existKho) {
-          var isLe = r[2] !== r[5];
+          var isLe = r[3] !== r[6];
           if (!khoMap[r[0]]) {
             // B:I = Tên(B), Nhóm(C), Đơn Vị Chẵn(D), Giá Vốn Chẵn(E), Quy Đổi(F), Đơn Vị Lẻ(G), Giá Vốn Lẻ(H), Tồn Kho Lẻ(I)
-            var dvLe = isLe ? r[2] : "";
-            var gvLe = r[6] > 0 ? r[4] / r[6] : r[4];
+            var dvLe = isLe ? r[3] : "";
+            var gvLe = r[7] > 0 ? r[5] / r[7] : r[5];
             khoMap[r[0]] = [
               r[0],
-              r[1],
-              r[5] || r[2],
-              r[4],
-              r[6] || 0,
+              r[2],
+              r[6] || r[3],
+              r[5],
+              r[7] || 0,
               dvLe,
               gvLe,
               0,
@@ -760,12 +818,12 @@ function syncProductCatalog_(ss, products) {
           } else {
             // Đã có trong map (sp này có 2 dòng chẵn/lẻ được tạo mới cùng lúc)
             if (isLe) {
-              khoMap[r[0]][5] = r[2]; // Ghi nhận đơn vị lẻ
-              khoMap[r[0]][6] = r[6] > 0 ? r[4] / r[6] : r[4]; // Cập nhật lại giá vốn lẻ
+              khoMap[r[0]][5] = r[3]; // Ghi nhận đơn vị lẻ
+              khoMap[r[0]][6] = r[7] > 0 ? r[5] / r[7] : r[5]; // Cập nhật lại giá vốn lẻ
             } else {
               // Nếu dòng hiện tại là chẵn, cập nhật lại đơn vị/giá chẵn
-              khoMap[r[0]][2] = r[2];
-              khoMap[r[0]][3] = r[4];
+              khoMap[r[0]][2] = r[3];
+              khoMap[r[0]][3] = r[5];
             }
           }
         }
@@ -805,8 +863,10 @@ function getProductCatalog() {
         return { success: true, data: [] };
       }
 
-      // B:F = TEN SAN PHAM | NHOM HANG | DON VI | GIA | GIA VON
-      var values = sheet.getRange(3, 2, lastRow - 2, 5).getDisplayValues();
+      // B:G = TEN SAN PHAM | ANH SAN PHAM | NHOM HANG | DON VI | GIA | GIA VON
+      var numRows = lastRow - 2;
+      var values = sheet.getRange(3, 2, numRows, 6).getDisplayValues();
+      var richTexts = sheet.getRange(3, 3, numRows, 1).getRichTextValues();
       var data = [];
       for (var i = 0; i < values.length; i++) {
         var row = values[i];
@@ -814,10 +874,11 @@ function getProductCatalog() {
         if (!tenSanPham) continue;
         data.push({
           tenSanPham: tenSanPham,
-          nhomHang: String(row[1] || "").trim(),
-          donVi: String(row[2] || "").trim(),
-          donGiaBan: parseMoneyNumber_(row[3]),
-          giaVon: parseMoneyNumber_(row[4]),
+          anhSanPham: getImageUrlFromRichText_(richTexts[i][0], row[1]),
+          nhomHang: String(row[2] || "").trim(),
+          donVi: String(row[3] || "").trim(),
+          donGiaBan: parseMoneyNumber_(row[4]),
+          giaVon: parseMoneyNumber_(row[5]),
         });
       }
 
@@ -1093,10 +1154,10 @@ function findProductRowByKey_(sheet, dataStartRow, tenSanPham, donVi) {
   if (lastDataRow < dataStartRow) return 0;
   var key = buildProductKey_(tenSanPham, donVi);
   var values = sheet
-    .getRange(dataStartRow, 2, lastDataRow - dataStartRow + 1, 3)
+    .getRange(dataStartRow, 2, lastDataRow - dataStartRow + 1, 4)
     .getDisplayValues();
   for (var i = 0; i < values.length; i++) {
-    if (buildProductKey_(values[i][0], values[i][2]) === key) {
+    if (buildProductKey_(values[i][0], values[i][3]) === key) {
       return dataStartRow + i;
     }
   }
@@ -1140,6 +1201,7 @@ function updateProductCatalogItemInternal_(payload) {
     var donVi = String(p.donVi || "").trim();
     var donGiaBan = Math.max(parseMoneyNumber_(p.donGiaBan), 0);
     var giaVon = Math.max(parseMoneyNumber_(p.giaVon), 0);
+    var anhSanPham = p.anhSanPham !== undefined ? String(p.anhSanPham || "").trim() : null;
     var donViLon = String(p.donViLon || "").trim();
     var quyCach = Math.max(parseMoneyNumber_(p.quyCach), 0);
 
@@ -1163,6 +1225,11 @@ function updateProductCatalogItemInternal_(payload) {
     );
     if (!sourceRow) throw new Error("Không tìm thấy sản phẩm để cập nhật");
 
+    if (anhSanPham === null) {
+      var rt = sheet.getRange(sourceRow, 3).getRichTextValue();
+      anhSanPham = getImageUrlFromRichText_(rt, String(sheet.getRange(sourceRow, 3).getValue() || ""));
+    }
+
     var targetRow = sourceRow;
     var oldKey = buildProductKey_(originalTenSanPham, originalDonVi);
     var newKey = buildProductKey_(tenSanPham, donVi);
@@ -1179,8 +1246,9 @@ function updateProductCatalogItemInternal_(payload) {
     }
 
     sheet
-      .getRange(targetRow, 2, 1, 5)
-      .setValues([[tenSanPham, nhomHang, donVi, donGiaBan, giaVon]]);
+      .getRange(targetRow, 2, 1, 6)
+      .setValues([[tenSanPham, "", nhomHang, donVi, donGiaBan, giaVon]]);
+    setImageHyperlink_(sheet, targetRow, 3, anhSanPham);
     if (targetRow !== sourceRow) {
       sheet.deleteRow(sourceRow);
       if (targetRow > sourceRow) targetRow = targetRow - 1;
@@ -1237,6 +1305,7 @@ function createProductCatalogItemInternal_(payload) {
     var donVi = String(p.donVi || "").trim();
     var donGiaBan = Math.max(parseMoneyNumber_(p.donGiaBan), 0);
     var giaVon = Math.max(parseMoneyNumber_(p.giaVon), 0);
+    var anhSanPham = String(p.anhSanPham || "").trim();
     var donViLon = String(p.donViLon || "").trim();
     var quyCach = Math.max(parseMoneyNumber_(p.quyCach), 0);
 
@@ -1265,12 +1334,13 @@ function createProductCatalogItemInternal_(payload) {
       dataStartRow,
       appendStartRow,
       1,
-      Math.max(6, sheet.getLastColumn()),
+      Math.max(7, sheet.getLastColumn()),
     );
 
     sheet
-      .getRange(appendStartRow, 2, 1, 5)
-      .setValues([[tenSanPham, nhomHang, donVi, donGiaBan, giaVon]]);
+      .getRange(appendStartRow, 2, 1, 6)
+      .setValues([[tenSanPham, "", nhomHang, donVi, donGiaBan, giaVon]]);
+    setImageHyperlink_(sheet, appendStartRow, 3, anhSanPham);
     // DEFER STT UPDATE
     // updateSTT_(sheet, dataStartRow);
 
@@ -3719,6 +3789,38 @@ function createInventoryReceiptInternal_(payload) {
   }
 }
 
+function uploadImageToImgBB(base64Data) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty("IMGBB_API_KEY");
+    if (!apiKey) throw new Error("Ch\u01b0a c\u1ea5u h\u00ecnh IMGBB_API_KEY trong Script Properties");
+
+    var cleanBase64 = String(base64Data || "").replace(/^data:image\/[^;]+;base64,/, "");
+    if (!cleanBase64) throw new Error("D\u1eef li\u1ec7u \u1ea3nh tr\u1ed1ng");
+
+    var response = UrlFetchApp.fetch("https://api.imgbb.com/1/upload", {
+      method: "post",
+      payload: {
+        key: apiKey,
+        image: cleanBase64,
+      },
+    });
+
+    var json = JSON.parse(response.getContentText());
+    if (json && json.data && json.data.url) {
+      return {
+        success: true,
+        data: {
+          url: json.data.url,
+          thumb: (json.data.thumb && json.data.thumb.url) || json.data.url,
+        },
+      };
+    }
+    throw new Error("ImgBB response invalid");
+  } catch (e) {
+    return { success: false, message: "L\u1ed7i upload \u1ea3nh: " + e.message };
+  }
+}
+
 /* CLIENT_API_WRAPPERS */
 const loginClient = (email, password) => call("login", email, password);
 const getUserInfoClient = (email) => call("getUserInfo", email);
@@ -3749,6 +3851,8 @@ const deleteOrderClient = (maPhieu) => call("deleteOrder", maPhieu);
 const getSupplierDebtsClient = () => call("getSupplierDebts");
 const updateSupplierDebtClient = (payload) =>
   call("updateSupplierDebt", payload);
+const uploadImageToImgBBClient = (base64Data) =>
+  call("uploadImageToImgBB", base64Data);
 
 export const gasAdapter = {
   call,
@@ -3781,6 +3885,7 @@ export const gasAdapter = {
   setAppSetting: (payload) => call("setAppSetting", payload),
   getSupplierDebts: getSupplierDebtsClient,
   updateSupplierDebt: updateSupplierDebtClient,
+  uploadImageToImgBB: uploadImageToImgBBClient,
   formatAllSheets: () => call("formatAllSheets"),
 };
 
@@ -3849,4 +3954,63 @@ function formatAllSheets_() {
   if (sheetSP) updateSTT_(sheetSP, 3);
 
   return { success: true, message: "Đã format lại các sheet" };
+}
+
+// ===== Action Log =====
+
+function getOrCreateLogSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Log");
+  if (sheet) return sheet;
+
+  sheet = ss.insertSheet("Log");
+  sheet.getRange(1, 1, 1, 5).setValues([
+    ["Ngày giờ", "Người dùng", "Thay đổi", "Trạng thái", "Thông báo lỗi"]
+  ]);
+  sheet.getRange(1, 1, 1, 5)
+    .setFontWeight("bold")
+    .setBackground("#f1f5f9");
+  sheet.setColumnWidth(1, 160);
+  sheet.setColumnWidth(2, 120);
+  sheet.setColumnWidth(3, 350);
+  sheet.setColumnWidth(4, 100);
+  sheet.setColumnWidth(5, 300);
+  return sheet;
+}
+
+function logAction(payload) {
+  try {
+    var p = payload || {};
+    var userName = String(p.userName || "unknown").trim();
+    var changeDescription = String(p.changeDescription || "").trim();
+    var status = String(p.status || "SUCCESS").trim().toUpperCase();
+    var errorMessage = String(p.errorMessage || "").trim();
+
+    var tz = Session.getScriptTimeZone() || "Asia/Ho_Chi_Minh";
+    var timestamp = Utilities.formatDate(new Date(), tz, "d.M.yyyy H:mm:ss");
+
+    var sheet = getOrCreateLogSheet_();
+    var lastRow = sheet.getLastRow();
+    var newRow = lastRow + 1;
+
+    if (newRow > sheet.getMaxRows()) {
+      sheet.insertRowsAfter(sheet.getMaxRows(), 1);
+    }
+
+    sheet.getRange(newRow, 1, 1, 5).setValues([
+      [timestamp, userName, changeDescription, status, errorMessage]
+    ]);
+
+    // Color code the status cell
+    var statusCell = sheet.getRange(newRow, 4);
+    if (status === "SUCCESS") {
+      statusCell.setFontColor("#16a34a");
+    } else if (status === "ERROR") {
+      statusCell.setFontColor("#dc2626").setFontWeight("bold");
+    }
+
+    return { success: true };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
 }

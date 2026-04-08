@@ -7,6 +7,9 @@ import {
   updateProductCatalogItem,
   formatAllSheets,
 } from "../api";
+import { runInBackground } from "../api/backgroundApi";
+import { useUser } from "../context";
+import ImageUploader from "../components/ImageUploader";
 
 const toNum = (v) => Number(String(v ?? "").replace(/[^\d.-]/g, "")) || 0;
 const fmt = (n) => Number(n || 0).toLocaleString("vi-VN");
@@ -19,7 +22,15 @@ const foldText = (v) =>
     .replace(/đ/g, "d")
     .trim();
 
-function MoneyInput({ value, onChange, placeholder, className = "", maxLength }) {
+/* ── Sub-components ── */
+
+function MoneyInput({
+  value,
+  onChange,
+  placeholder,
+  className = "",
+  maxLength,
+}) {
   const [display, setDisplay] = useState(value ? fmt(value) : "");
 
   useEffect(() => {
@@ -120,6 +131,8 @@ function LabeledTextInput({
   );
 }
 
+/* ── Data helpers ── */
+
 const toViewRow = (p, idx) => ({
   id: `sp-${idx}-${Date.now()}`,
   isNew: false,
@@ -127,13 +140,17 @@ const toViewRow = (p, idx) => ({
   originalNhomHang: String(p.nhomHang || ""),
   originalDonVi: String(p.donVi || ""),
   tenSanPham: String(p.tenSanPham || ""),
+  anhSanPham: String(p.anhSanPham || ""),
   nhomHang: String(p.nhomHang || ""),
   donVi: String(p.donVi || ""),
   donGiaBan: toNum(p.donGiaBan),
   giaVon: toNum(p.giaVon),
 });
 
+/* ── Main Page ── */
+
 export default function ProductsPage() {
+  const { user } = useUser();
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState("");
   const [deletingKey, setDeletingKey] = useState("");
@@ -142,6 +159,19 @@ export default function ProductsPage() {
   const [rows, setRows] = useState([]);
   const [errorsMap, setErrorsMap] = useState({});
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  // Toggle hiện/ẩn ảnh
+  const [showImages, setShowImages] = useState(
+    () => localStorage.getItem("show_product_images") !== "false",
+  );
+  const toggleImages = () => {
+    setShowImages((prev) => {
+      const next = !prev;
+      localStorage.setItem("show_product_images", String(next));
+      return next;
+    });
+  };
 
   const loadProducts = async () => {
     setLoading(true);
@@ -198,6 +228,7 @@ export default function ProductsPage() {
         originalNhomHang: "",
         originalDonVi: "",
         tenSanPham: "",
+        anhSanPham: "",
         nhomHang: "",
         donVi: "",
         donGiaBan: 0,
@@ -244,24 +275,29 @@ export default function ProductsPage() {
 
     return {
       ok: true,
-      data: { tenSanPham, nhomHang, donVi, donGiaBan, giaVon },
+      data: {
+        tenSanPham,
+        anhSanPham: String(row.anhSanPham || "").trim(),
+        nhomHang,
+        donVi,
+        donGiaBan,
+        giaVon,
+      },
     };
   };
 
-  const handleSaveRow = async (row) => {
+  const handleSaveRow = (row) => {
     const validated = validateRow(row);
     if (!validated.ok) {
       setErrorsMap((prev) => ({ ...prev, [row.id]: validated.errors }));
       return toast.error("Vui lòng kiểm tra lại thông tin");
     }
     const data = validated.data;
-
-    // Snapshot for rollback
-    const rowsSnapshot = rows;
-    const openIdSnapshot = openId;
+    const isNew = row.isNew;
+    const actionLabel = isNew ? "Tạo" : "Cập nhật";
 
     // Optimistic UI: update row in list + close editor
-    if (row.isNew) {
+    if (isNew) {
       setRows((prev) =>
         prev.map((r) =>
           r.id === row.id
@@ -297,55 +333,28 @@ export default function ProductsPage() {
       delete next[row.id];
       return next;
     });
+    setSavingKey("");
 
-    setSavingKey(row.id);
-    const toastId = toast.loading("Đang lưu sản phẩm...", {
-      duration: Infinity,
-    });
-
-    try {
-      let res;
-      if (row.isNew) {
-        res = await createProductCatalogItem(data);
-      } else {
-        res = await updateProductCatalogItem({
+    const apiCall = isNew
+      ? () => createProductCatalogItem(data)
+      : () => updateProductCatalogItem({
           originalTenSanPham: row.originalTenSanPham,
           originalDonVi: row.originalDonVi,
           ...data,
         });
-      }
 
-      if (!res?.success) {
-        // Rollback
-        setRows(rowsSnapshot);
-        setOpenId(openIdSnapshot);
-        toast.error(res?.message || "Lưu sản phẩm thất bại, đã khôi phục.", {
-          id: toastId,
-          duration: 5000,
-        });
-        return;
-      }
-
-      toast.success(res.message || "Đã lưu sản phẩm", {
-        id: toastId,
-        duration: 5000,
-      });
-      try {
-        formatAllSheets().catch(() => {});
-      } catch (e) {}
-      // Fire-and-forget: sync real data
-      loadProducts().catch(() => {});
-    } catch (e) {
-      // Rollback
-      setRows(rowsSnapshot);
-      setOpenId(openIdSnapshot);
-      toast.error("Lưu sản phẩm thất bại, đã khôi phục.", {
-        id: toastId,
-        duration: 5000,
-      });
-    } finally {
-      setSavingKey("");
-    }
+    runInBackground({
+      apiCall,
+      successMessage: `${actionLabel} sản phẩm "${data.tenSanPham}" thành công`,
+      changeDescription: `${actionLabel} sản phẩm "${data.tenSanPham}"`,
+      userName: user?.name || user?.email || "unknown",
+      onComplete: (result) => {
+        if (result?.success) {
+          formatAllSheets().catch(() => {});
+        }
+        loadProducts().catch(() => {});
+      },
+    });
   };
 
   const handleDeleteRow = (row) => {
@@ -356,59 +365,31 @@ export default function ProductsPage() {
     setDeleteTarget(row);
   };
 
-  const confirmDeleteRow = async () => {
+  const confirmDeleteRow = () => {
     const row = deleteTarget;
     if (!row) return;
 
-    // Snapshot for rollback
-    const rowsSnapshot = rows;
-    const openIdSnapshot = openId;
+    const tenSanPham = row.originalTenSanPham || row.tenSanPham;
+    const donVi = row.originalDonVi || row.donVi;
 
     // Optimistic UI: remove from list immediately
     setRows((prev) => prev.filter((r) => r.id !== row.id));
     setOpenId("");
     setDeleteTarget(null);
+    setDeletingKey("");
 
-    setDeletingKey(row.id);
-    const toastId = toast.loading("Đang xóa sản phẩm...", {
-      duration: Infinity,
+    runInBackground({
+      apiCall: () => deleteProductCatalogItem({ tenSanPham, donVi }),
+      successMessage: `Đã xóa sản phẩm "${tenSanPham}"`,
+      changeDescription: `Xóa sản phẩm "${tenSanPham}"`,
+      userName: user?.name || user?.email || "unknown",
+      onComplete: (result) => {
+        if (result?.success) {
+          formatAllSheets().catch(() => {});
+        }
+        loadProducts().catch(() => {});
+      },
     });
-
-    try {
-      const res = await deleteProductCatalogItem({
-        tenSanPham: row.originalTenSanPham || row.tenSanPham,
-        donVi: row.originalDonVi || row.donVi,
-      });
-      if (!res?.success) {
-        // Rollback
-        setRows(rowsSnapshot);
-        setOpenId(openIdSnapshot);
-        toast.error(res?.message || "Xóa sản phẩm thất bại, đã khôi phục.", {
-          id: toastId,
-          duration: 5000,
-        });
-        return;
-      }
-      toast.success(res.message || "Đã xóa sản phẩm", {
-        id: toastId,
-        duration: 5000,
-      });
-      try {
-        formatAllSheets().catch(() => {});
-      } catch (e) {}
-      // Fire-and-forget: sync real data
-      loadProducts().catch(() => {});
-    } catch (e) {
-      // Rollback
-      setRows(rowsSnapshot);
-      setOpenId(openIdSnapshot);
-      toast.error("Xóa sản phẩm thất bại, đã khôi phục.", {
-        id: toastId,
-        duration: 5000,
-      });
-    } finally {
-      setDeletingKey("");
-    }
   };
 
   return (
@@ -419,7 +400,7 @@ export default function ProductsPage() {
             Danh sách sản phẩm
           </h1>
           <p className="mt-2 text-sm md:text-base text-slate-500">
-            Bấm vào icon bên phải để mở chi tiết, lưu hoặc xóa sản phẩm.
+            Bấm vào sản phẩm để mở chi tiết, lưu hoặc xóa.
           </p>
         </div>
 
@@ -431,20 +412,41 @@ export default function ProductsPage() {
               placeholder="Tìm theo tên sản phẩm hoặc đơn vị..."
               className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
             />
-            <button
-              type="button"
-              onClick={addProductDraft}
-              className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100 whitespace-nowrap md:min-w-[170px]"
-            >
-              + Thêm sản phẩm
-            </button>
-            <button
-              type="button"
-              onClick={loadProducts}
-              className="rounded-xl bg-gradient-to-r from-rose-700 to-rose-500 px-4 py-2.5 text-sm font-semibold text-white hover:shadow-lg hover:shadow-rose-700/25 whitespace-nowrap md:min-w-[120px]"
-            >
-              Tải lại
-            </button>
+            <div className="flex gap-2">
+              {/* Toggle ảnh */}
+              <button
+                type="button"
+                onClick={toggleImages}
+                className={`rounded-xl border px-3 py-2.5 text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                  showImages
+                    ? "border-blue-300 bg-blue-50 text-blue-700"
+                    : "border-slate-200 bg-slate-50 text-slate-400"
+                }`}
+              >
+                <span
+                  className={`inline-block w-7 h-4 rounded-full relative transition-colors ${showImages ? "bg-blue-500" : "bg-slate-300"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all ${showImages ? "left-3.5" : "left-0.5"}`}
+                  />
+                </span>
+                Ảnh
+              </button>
+              <button
+                type="button"
+                onClick={addProductDraft}
+                className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100 whitespace-nowrap"
+              >
+                + Thêm SP
+              </button>
+              <button
+                type="button"
+                onClick={loadProducts}
+                className="rounded-xl bg-gradient-to-r from-rose-700 to-rose-500 px-4 py-2.5 text-sm font-semibold text-white hover:shadow-lg hover:shadow-rose-700/25 whitespace-nowrap"
+              >
+                Tải lại
+              </button>
+            </div>
           </div>
         </section>
 
@@ -470,14 +472,40 @@ export default function ProductsPage() {
                   <button
                     type="button"
                     onClick={() => setOpenId(open ? "" : row.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-2 transition-colors ${
+                    className={`w-full flex items-center gap-3 px-4 py-2.5 transition-colors ${
                       open
                         ? "bg-rose-50/60 hover:bg-rose-50"
                         : "hover:bg-slate-50"
                     }`}
                   >
+                    {/* Thumbnail ảnh */}
+                    {showImages && (
+                      <div className="flex-shrink-0">
+                        {row.anhSanPham ? (
+                          <img
+                            src={row.anhSanPham}
+                            alt=""
+                            className="w-11 h-11 rounded-lg object-cover border border-slate-200"
+                            onError={(e) => {
+                              e.target.onerror = null;
+                              e.target.src = "";
+                              e.target.style.display = "none";
+                              e.target.nextElementSibling &&
+                                (e.target.nextElementSibling.style.display =
+                                  "flex");
+                            }}
+                          />
+                        ) : null}
+                        {!row.anhSanPham && (
+                          <div className="w-11 h-11 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-lg">
+                            📦
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <span
-                      className={`h-6 w-1.5 rounded-full ${open ? "bg-rose-300" : "bg-rose-100"}`}
+                      className={`h-6 w-1.5 rounded-full flex-shrink-0 ${open ? "bg-rose-300" : "bg-rose-100"}`}
                     />
                     <div className="min-w-0 flex-1 text-left">
                       <p className="text-sm md:text-base font-bold text-slate-900 truncate">
@@ -495,8 +523,13 @@ export default function ProductsPage() {
                         )}
                       </p>
                     </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-xs font-semibold text-emerald-700">
+                        {fmt(row.donGiaBan)}đ
+                      </p>
+                    </div>
                     <span
-                      className={`inline-flex h-7 w-7 items-center justify-center rounded-full border transition-all duration-300 ease-out ${
+                      className={`inline-flex h-7 w-7 items-center justify-center rounded-full border transition-all duration-300 ease-out flex-shrink-0 ${
                         open
                           ? "border-rose-300 bg-rose-100 text-rose-700 -rotate-180"
                           : "border-slate-200 bg-white text-slate-500 rotate-0"
@@ -519,6 +552,18 @@ export default function ProductsPage() {
 
                   {open && (
                     <div className="border-t border-rose-100 bg-rose-50/30 p-4 space-y-3">
+                      {/* Image Upload Section */}
+                      <div className="pb-2 border-b border-rose-100/60">
+                        <ImageUploader
+                          currentUrl={row.anhSanPham}
+                          onUploaded={(url) =>
+                            patchRow(row.id, { anhSanPham: url })
+                          }
+                          uploading={uploadingImage}
+                          setUploading={setUploadingImage}
+                        />
+                      </div>
+
                       <div className="grid gap-2 md:gap-3 md:grid-cols-2 lg:grid-cols-3">
                         <LabeledTextInput
                           className="lg:col-span-2"
@@ -575,7 +620,9 @@ export default function ProductsPage() {
                           type="button"
                           onClick={() => handleDeleteRow(row)}
                           disabled={
-                            deletingKey === row.id || savingKey === row.id
+                            deletingKey === row.id ||
+                            savingKey === row.id ||
+                            uploadingImage
                           }
                           className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
                         >
@@ -585,7 +632,9 @@ export default function ProductsPage() {
                           type="button"
                           onClick={() => handleSaveRow(row)}
                           disabled={
-                            savingKey === row.id || deletingKey === row.id
+                            savingKey === row.id ||
+                            deletingKey === row.id ||
+                            uploadingImage
                           }
                           className={`rounded-xl px-4 py-2 text-sm font-semibold text-white ${
                             savingKey === row.id
@@ -616,9 +665,12 @@ export default function ProductsPage() {
             className="mx-auto mt-[18vh] w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-bold text-slate-900">
-              Xác nhận xóa sản phẩm
-            </h3>
+            <div className="flex items-center gap-2.5 mb-2">
+              <div className="w-1.5 h-5 rounded-full bg-rose-600 shadow-sm mt-0.5"></div>
+              <h3 className="text-base font-black text-slate-900 tracking-tight">
+                Xác nhận xóa sản phẩm
+              </h3>
+            </div>
             <p className="mt-2 text-sm text-slate-600">
               Bạn sắp xóa sản phẩm{" "}
               <span className="font-semibold text-slate-900">

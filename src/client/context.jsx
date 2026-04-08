@@ -10,8 +10,7 @@ const readStoredUser = () => {
     if (!raw) return null
     const parsed = JSON.parse(raw)
     const user = parsed?.user || null
-    const expiresAt = Number(parsed?.expiresAt || 0)
-    if (!user || !expiresAt || Date.now() >= expiresAt) {
+    if (!user) {
       localStorage.removeItem(USER_STORAGE_KEY)
       return null
     }
@@ -31,10 +30,7 @@ export function UserProvider({ children }) {
       try {
         localStorage.setItem(
           USER_STORAGE_KEY,
-          JSON.stringify({
-            user: nextUser,
-            expiresAt: Date.now() + USER_TTL_MS,
-          }),
+          JSON.stringify({ user: nextUser }),
         )
       } catch (e) {
         // ignore storage failures (private mode, blocked storage)
@@ -54,34 +50,7 @@ export function UserProvider({ children }) {
       const raw = localStorage.getItem(USER_STORAGE_KEY)
       if (!raw) {
         setUserState(null)
-        return
       }
-      const parsed = JSON.parse(raw)
-      const expiresAt = Number(parsed?.expiresAt || 0)
-      if (!expiresAt || Date.now() >= expiresAt) {
-        localStorage.removeItem(USER_STORAGE_KEY)
-        setUserState(null)
-        return
-      }
-      let timeoutMs = expiresAt - Date.now()
-      // setTimeout dung lượng tối đa là số nguyên 32 bit (khoảng 24.8 ngày ~ 2147483647 ms).
-      // Nếu timeoutMs lớn hơn con số này, setTimeout sẽ tràn ngập và thực thi ngay lập tức.
-      const MAX_TIMEOUT = 2147483647
-      if (timeoutMs > MAX_TIMEOUT) {
-        timeoutMs = MAX_TIMEOUT
-      }
-      
-      const timer = setTimeout(() => {
-        if (Date.now() >= expiresAt) {
-          try {
-            localStorage.removeItem(USER_STORAGE_KEY)
-          } catch (e) {
-            // ignore
-          }
-          setUserState(null)
-        }
-      }, timeoutMs)
-      return () => clearTimeout(timer)
     } catch (e) {
       try {
         localStorage.removeItem(USER_STORAGE_KEY)

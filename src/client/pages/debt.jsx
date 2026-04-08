@@ -6,10 +6,13 @@ import {
   getSupplierCatalog,
   getDebtCustomers,
   updateDebtCustomer,
+  updateSupplierDebt,
   getSupplierDebts,
   getAppSetting,
   formatAllSheets,
 } from "../api";
+import { runInBackground } from "../api/backgroundApi";
+import { useUser } from "../context";
 import {
   formatMoney as fmt,
   parseNumber as toNum,
@@ -256,11 +259,14 @@ function EditDebtModal({
       >
         <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 md:px-5 text-left">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="text-base md:text-lg font-bold text-slate-900">
-              {isSupplier
-                ? "Sửa công nợ nhà cung cấp"
-                : "Sửa công nợ khách hàng"}
-            </h3>
+            <div className="flex items-center gap-2.5 mb-1">
+              <div className="w-1.5 h-5 rounded-full bg-rose-600 shadow-sm mt-0.5"></div>
+              <h3 className="text-base md:text-lg font-black text-slate-900 tracking-tight">
+                {isSupplier
+                  ? "Sửa công nợ nhà cung cấp"
+                  : "Sửa công nợ khách hàng"}
+              </h3>
+            </div>
             <button
               type="button"
               onClick={onClose}
@@ -490,6 +496,7 @@ function EditDebtModal({
 }
 
 export default function DebtPage() {
+  const { user } = useUser();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -611,7 +618,7 @@ export default function DebtPage() {
     );
   };
 
-  const handleSave = async (form) => {
+  const handleSave = (form) => {
     const maPhieu = String(form.maPhieu || "").trim();
     if (!maPhieu) return toast.error("Mã phiếu không được để trống");
     const name = String(form.name || "").trim();
@@ -622,9 +629,6 @@ export default function DebtPage() {
           : "Tên khách không được để trống",
       );
 
-    // Snapshot for rollback
-    const rowsSnapshot = rows;
-    const editingSnapshot = editing;
     const isSup = activeTab === "suppliers";
 
     // Optimistic UI: update row + close modal
@@ -643,51 +647,35 @@ export default function DebtPage() {
       ),
     );
     setEditing(null);
+    setSaving(false);
 
-    setSaving(true);
-    const toastId = toast.loading("Đang lưu công nợ...", { duration: Infinity });
+    const payload = {
+      maPhieuOriginal: form.maPhieuOriginal,
+      soDienThoai: String(form.soDienThoai || "").trim(),
+      maPhieu,
+      tienNo: Math.max(toNum(form.tienNo), 0),
+      trangThai: form.trangThai,
+      ghiChu: String(form.ghiChu || "-").trim() || "-",
+    };
 
-    try {
-      const payload = {
-        maPhieuOriginal: form.maPhieuOriginal,
-        soDienThoai: String(form.soDienThoai || "").trim(),
-        maPhieu,
-        tienNo: Math.max(toNum(form.tienNo), 0),
-        trangThai: form.trangThai,
-        ghiChu: String(form.ghiChu || "-").trim() || "-",
-      };
+    const apiCall = isSup
+      ? () => updateSupplierDebt({ ...payload, nhaCungCap: name, ngayNhap: form.date || "" })
+      : () => updateDebtCustomer({ ...payload, tenKhach: name, ngayBan: form.date || "" });
 
-      let res;
-      if (isSup) {
-        res = await updateSupplierDebt({
-          ...payload,
-          nhaCungCap: name,
-          ngayNhap: form.date || "",
-        });
-      } else {
-        res = await updateDebtCustomer({
-          ...payload,
-          tenKhach: name,
-          ngayBan: form.date || "",
-        });
-      }
+    const label = isSup ? "nhà cung cấp" : "khách hàng";
 
-      if (!res?.success) {
-        setRows(rowsSnapshot);
-        setEditing(editingSnapshot);
-        toast.error(res?.message || "Cập nhật công nợ thất bại, đã khôi phục.", { id: toastId, duration: 5000 });
-        return;
-      }
-      toast.success(res.message || "Cập nhật công nợ thành công", { id: toastId, duration: 5000 });
-      try { formatAllSheets().catch(() => {}); } catch (e) {}
-      loadDebts().catch(() => {});
-    } catch (e) {
-      setRows(rowsSnapshot);
-      setEditing(editingSnapshot);
-      toast.error("Cập nhật công nợ thất bại, đã khôi phục.", { id: toastId, duration: 5000 });
-    } finally {
-      setSaving(false);
-    }
+    runInBackground({
+      apiCall,
+      successMessage: `Cập nhật công nợ ${label} "${name}" thành công`,
+      changeDescription: `Cập nhật công nợ ${label} "${name}" (${maPhieu})`,
+      userName: user?.name || user?.email || "unknown",
+      onComplete: (result) => {
+        if (result?.success) {
+          formatAllSheets().catch(() => {});
+        }
+        loadDebts().catch(() => {});
+      },
+    });
   };
 
   const handleDeleteRequest = () => {
@@ -695,52 +683,40 @@ export default function DebtPage() {
     setDeleteTarget(editing);
   };
 
-  const confirmDeleteOrder = async () => {
+  const confirmDeleteOrder = () => {
     const key = String(deleteTarget?.maPhieu || "").trim();
     if (!key) return;
-
-    // Snapshot for rollback
-    const rowsSnapshot = rows;
-    const editingSnapshot = editing;
 
     // Optimistic UI: remove from list immediately
     setRows((prev) => prev.filter((r) => String(r.maPhieu || "").trim() !== key));
     setDeleteTarget(null);
     setEditing(null);
+    setDeleting(false);
 
-    setDeleting(true);
-    const toastId = toast.loading("Đang xóa hóa đơn...", { duration: Infinity });
-
-    try {
-      const res = await deleteOrder(key);
-      if (res?.success) {
-        toast.success(res.message || "Đã xóa hóa đơn", { id: toastId, duration: 5000 });
-        try { formatAllSheets().catch(() => {}); } catch (e) {}
+    runInBackground({
+      apiCall: () => deleteOrder(key),
+      successMessage: `Đã xóa hóa đơn ${key}`,
+      changeDescription: `Xóa hóa đơn công nợ "${key}"`,
+      userName: user?.name || user?.email || "unknown",
+      onComplete: (result) => {
+        if (result?.success) {
+          formatAllSheets().catch(() => {});
+        }
         loadDebts().catch(() => {});
-      } else {
-        setRows(rowsSnapshot);
-        setEditing(editingSnapshot);
-        toast.error(res?.message || "Xóa thất bại, đã khôi phục.", { id: toastId, duration: 5000 });
-      }
-    } catch (e) {
-      setRows(rowsSnapshot);
-      setEditing(editingSnapshot);
-      toast.error("Xóa thất bại, đã khôi phục.", { id: toastId, duration: 5000 });
-    } finally {
-      setDeleting(false);
-    }
+      },
+    });
   };
 
-  const handleQuickSettle = async (target) => {
+  const handleQuickSettle = (target) => {
     const maPhieuKey = String(
       target?.maPhieuOriginal || target?.maPhieu || "",
     ).trim();
     if (!maPhieuKey) return toast.error("Thiếu mã phiếu");
 
-    // Snapshot for rollback
-    const rowsSnapshot = rows;
-    const editingSnapshot = editing;
     const isSup = activeTab === "suppliers";
+    const name = isSup
+      ? String(target.nhaCungCap || "").trim()
+      : String(target.tenKhach || "").trim();
 
     // Optimistic UI: mark as paid immediately
     setRows((prev) =>
@@ -752,58 +728,43 @@ export default function DebtPage() {
     );
     if (editing && String(editing.maPhieu || "").trim() === maPhieuKey)
       setEditing(null);
+    setSettlingKey("");
 
-    setSettlingKey(maPhieuKey);
-    const toastId = toast.loading(
-      isSup ? "Đang trả nợ..." : "Đang thu công nợ...",
-      { duration: Infinity },
-    );
+    const payload = {
+      maPhieuOriginal: maPhieuKey,
+      soDienThoai: String(target.soDienThoai || "").trim(),
+      maPhieu: String(target.maPhieu || maPhieuKey).trim() || maPhieuKey,
+      tienNo: 0,
+      trangThai: "Đã thanh toán",
+      ghiChu: String(target.ghiChu || "-").trim() || "-",
+    };
 
-    try {
-      const payload = {
-        maPhieuOriginal: maPhieuKey,
-        soDienThoai: String(target.soDienThoai || "").trim(),
-        maPhieu: String(target.maPhieu || maPhieuKey).trim() || maPhieuKey,
-        tienNo: 0,
-        trangThai: "Đã thanh toán",
-        ghiChu: String(target.ghiChu || "-").trim() || "-",
-      };
-
-      let res;
-      if (isSup) {
-        res = await updateSupplierDebt({
+    const apiCall = isSup
+      ? () => updateSupplierDebt({
           ...payload,
           nhaCungCap: String(target.nhaCungCap || "").trim(),
           ngayNhap: target.ngayNhap || "",
-        });
-      } else {
-        res = await updateDebtCustomer({
+        })
+      : () => updateDebtCustomer({
           ...payload,
           tenKhach: String(target.tenKhach || "").trim(),
           ngayBan: target.ngayBan || "",
         });
-      }
 
-      if (res?.success) {
-        toast.success(
-          res.message ||
-            (isSup ? "Đã trả nợ thành công" : "Đã thu công nợ thành công"),
-          { id: toastId, duration: 5000 },
-        );
-        try { formatAllSheets().catch(() => {}); } catch (e) {}
+    const label = isSup ? "Trả nợ" : "Thu công nợ";
+
+    runInBackground({
+      apiCall,
+      successMessage: `${label} "${name}" thành công`,
+      changeDescription: `${label} "${name}" (${maPhieuKey})`,
+      userName: user?.name || user?.email || "unknown",
+      onComplete: (result) => {
+        if (result?.success) {
+          formatAllSheets().catch(() => {});
+        }
         loadDebts().catch(() => {});
-      } else {
-        setRows(rowsSnapshot);
-        setEditing(editingSnapshot);
-        toast.error(res?.message || "Thao tác thất bại, đã khôi phục.", { id: toastId, duration: 5000 });
-      }
-    } catch (e) {
-      setRows(rowsSnapshot);
-      setEditing(editingSnapshot);
-      toast.error("Thao tác thất bại, đã khôi phục.", { id: toastId, duration: 5000 });
-    } finally {
-      setSettlingKey("");
-    }
+      },
+    });
   };
 
   return (
@@ -1087,11 +1048,14 @@ export default function DebtPage() {
             className="mx-auto mt-[18vh] w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-bold text-slate-900">
-              {activeTab === "suppliers"
-                ? "Xác nhận trả nợ"
-                : "Xác nhận thu nợ"}
-            </h3>
+              <div className="flex items-center gap-2.5 mb-2">
+                <div className="w-1.5 h-5 rounded-full bg-rose-600 shadow-sm mt-0.5"></div>
+                <h3 className="text-base font-black text-slate-900 tracking-tight">
+                  {activeTab === "suppliers"
+                    ? "Xác nhận đã trả nợ"
+                    : "Xác nhận thu nợ"}
+                </h3>
+              </div>
             <p className="mt-2 text-sm text-slate-600">
               {activeTab === "suppliers" ? "Trả toàn bộ" : "Thu toàn bộ"} công
               nợ của{" "}
@@ -1149,9 +1113,12 @@ export default function DebtPage() {
             className="mx-auto mt-[18vh] w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-bold text-slate-900">
-              Xác nhận xóa hóa đơn
-            </h3>
+              <div className="flex items-center gap-2.5 mb-2">
+                <div className="w-1.5 h-5 rounded-full bg-rose-600 shadow-sm mt-0.5"></div>
+                <h3 className="text-base font-black text-slate-900 tracking-tight">
+                  Xác nhận xóa biên lai
+                </h3>
+              </div>
             <p className="mt-2 text-sm text-slate-600">
               Bạn sắp xóa hóa đơn{" "}
               <span className="font-semibold text-slate-900">

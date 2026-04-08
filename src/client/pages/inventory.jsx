@@ -8,6 +8,7 @@ import {
   getSupplierCatalog,
   formatAllSheets,
 } from "../api";
+import { runInBackground } from "../api/backgroundApi";
 import { normalizeText as foldText } from "../../core/core";
 
 const fmt = (n) => Number(n || 0).toLocaleString("vi-VN");
@@ -414,6 +415,17 @@ export default function InventoryPage({ user }) {
   const [supplierCatalog, setSupplierCatalog] = useState([]);
   const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
   const [products, setProducts] = useState([]);
+  const [productCatalog, setProductCatalog] = useState([]);
+  const [showImages, setShowImages] = useState(
+    () => localStorage.getItem("show_product_images") !== "false"
+  );
+
+  useEffect(() => {
+    const handleImageChange = () => setShowImages(localStorage.getItem("show_product_images") !== "false");
+    window.addEventListener("storage", handleImageChange);
+    return () => window.removeEventListener("storage", handleImageChange);
+  }, []);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showProductSuggestions, setShowProductSuggestions] = useState(false);
   const [isLoadingReceiptDefaults, setIsLoadingReceiptDefaults] =
@@ -460,11 +472,24 @@ export default function InventoryPage({ user }) {
   useEffect(() => {
     loadReceiptDefaults();
 
-    getInventorySuggestions().then((res) => {
-      if (res?.success && Array.isArray(res.data)) {
-        setProductSuggestions(res.data);
+    Promise.all([getProductCatalog(), getInventorySuggestions()]).then(
+      ([catRes, sugRes]) => {
+        let catalog = [];
+        if (catRes?.success && Array.isArray(catRes.data)) {
+          catalog = catRes.data;
+          setProductCatalog(catalog);
+        }
+        if (sugRes?.success && Array.isArray(sugRes.data)) {
+          const suggestionsWithImages = sugRes.data.map((s) => {
+            const match = catalog.find(
+              (c) => foldText(c.tenSanPham) === foldText(s.tenSanPham)
+            );
+            return { ...s, anhSanPham: match ? match.anhSanPham : "" };
+          });
+          setProductSuggestions(suggestionsWithImages);
+        }
       }
-    });
+    );
 
     getSupplierCatalog().then((res) => {
       if (res?.success && Array.isArray(res.data)) {
@@ -574,7 +599,7 @@ export default function InventoryPage({ user }) {
   );
   const totalItems = products.length; // Thay vì sum quantity, đếm số loại mặt hàng
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     if (isLoadingReceiptDefaults)
       return toast.error("Đang tải mã phiếu nhập mới, vui lòng chờ...");
@@ -602,10 +627,6 @@ export default function InventoryPage({ user }) {
         return toast.error("Số tiền đã trả không được lớn hơn tổng phiếu nhập");
     }
 
-    // Snapshot for rollback
-    const productsSnapshot = products;
-    const receiptInfoSnapshot = receiptInfo;
-
     const payload = {
       receiptInfo: {
         ...receiptInfo,
@@ -624,58 +645,47 @@ export default function InventoryPage({ user }) {
       user: user?.email || "Unknown",
     };
 
+    const maPhieu = receiptInfo.maPhieu || "";
+
     // Optimistic UI: clear form immediately
     setProducts([]);
     setReceiptInfo(createInitialReceiptInfo());
+    setIsSubmitting(false);
 
-    setIsSubmitting(true);
-    const toastId = toast.loading("Đang lưu phiếu nhập...", {
-      duration: Infinity,
-    });
-
-    try {
-      const res = await createInventoryReceipt(payload);
-      if (res?.success) {
-        toast.success(
-          res?.queued
-            ? res.message || "Phiếu nhập đã vào hàng đợi, đang xử lý trong nền."
-            : "Tạo phiếu nhập kho thành công!",
-          { id: toastId, duration: 5000 },
-        );
-        try {
-          if (!res?.queued) formatAllSheets().catch(() => {});
-        } catch (e) {}
-        // Fire-and-forget: reload data in background
+    runInBackground({
+      apiCall: () => createInventoryReceipt(payload),
+      successMessage: "Tạo phiếu nhập kho thành công!",
+      changeDescription: `Tạo phiếu nhập kho "${maPhieu}"`,
+      userName: user?.name || user?.email || "unknown",
+      onComplete: (result) => {
+        if (result?.success && !result?.queued) {
+          formatAllSheets().catch(() => {});
+        }
+        // Reload data in background
         Promise.all([
           loadReceiptDefaults(),
-          getInventorySuggestions().then((r) => {
-            if (r?.success && Array.isArray(r.data))
-              setProductSuggestions(r.data);
+          Promise.all([getProductCatalog(), getInventorySuggestions()]).then(([catRes, sugRes]) => {
+            let catalog = [];
+            if (catRes?.success && Array.isArray(catRes.data)) {
+              catalog = catRes.data;
+              setProductCatalog(catalog);
+            }
+            if (sugRes?.success && Array.isArray(sugRes.data)) {
+              const suggestionsWithImages = sugRes.data.map((s) => {
+                const match = catalog.find(
+                  (c) => foldText(c.tenSanPham) === foldText(s.tenSanPham)
+                );
+                return { ...s, anhSanPham: match ? match.anhSanPham : "" };
+              });
+              setProductSuggestions(suggestionsWithImages);
+            }
           }),
           getSupplierCatalog().then((r) => {
             if (r?.success && Array.isArray(r.data)) setSupplierCatalog(r.data);
           }),
         ]).catch(() => {});
-      } else {
-        // Rollback
-        setProducts(productsSnapshot);
-        setReceiptInfo(receiptInfoSnapshot);
-        toast.error(
-          res?.message || "Tạo phiếu nhập thất bại, đã khôi phục dữ liệu.",
-          { id: toastId, duration: 5000 },
-        );
-      }
-    } catch (err) {
-      // Rollback
-      setProducts(productsSnapshot);
-      setReceiptInfo(receiptInfoSnapshot);
-      toast.error("Có lỗi xảy ra, đã khôi phục dữ liệu phiếu nhập.", {
-        id: toastId,
-        duration: 5000,
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
+      },
+    });
   };
 
   const inputCls = (hasError) =>
@@ -712,11 +722,15 @@ export default function InventoryPage({ user }) {
         >
           <div className="lg:col-span-8 space-y-5 md:space-y-6">
             {/* Receipt Info */}
-            <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200">
-              <h3 className="font-bold text-base md:text-lg text-slate-800 mb-4">
-                Thông tin phiếu nhập
-              </h3>
-              <div className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200 overflow-hidden">
+              <div className="bg-emerald-50/80 border-b border-emerald-100/50 px-5 py-4 flex items-center gap-2.5">
+                <div className="w-1.5 h-4 rounded-full bg-emerald-600 shadow-sm"></div>
+                <h3 className="font-bold text-sm md:text-base text-emerald-800 uppercase tracking-widest mt-0.5">
+                  Thông tin phiếu nhập
+                </h3>
+              </div>
+              <div className="p-5 md:p-6 pt-5">
+                <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-slate-500">
                     Mã phiếu <span className="text-rose-500">*</span>
@@ -825,17 +839,19 @@ export default function InventoryPage({ user }) {
                   />
                 </div>
               </div>
+              </div>
             </div>
 
             {/* Add Product Form */}
-            <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 space-y-4 md:space-y-5 shadow-sm hover:shadow-md transition-all duration-300">
-              <div>
-                <h3 className="font-bold text-base md:text-lg text-slate-800 mb-0.5">
+            <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden">
+              <div className="bg-emerald-50/80 border-b border-emerald-100/50 px-5 py-4 flex items-center gap-2.5">
+                <div className="w-1.5 h-4 rounded-full bg-emerald-600 shadow-sm"></div>
+                <h3 className="font-bold text-sm md:text-base text-emerald-800 uppercase tracking-widest mt-0.5">
                   Thêm mặt hàng nhập
                 </h3>
               </div>
-
-              <div className="space-y-4">
+              <div className="p-5 md:p-6 pt-5 space-y-4 md:space-y-5">
+                <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-800 mb-2">
                     Tên hàng <span className="text-rose-500">*</span>
@@ -925,11 +941,24 @@ export default function InventoryPage({ user }) {
                                   }}
                                 >
                                   <div className="flex justify-between items-start gap-3">
-                                    <div className="flex-1 min-w-0">
-                                      <h4 className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors truncate">
-                                        {p.tenSanPham}
-                                      </h4>
-                                      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
+                                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                                      {showImages && p.anhSanPham ? (
+                                        <img
+                                          src={p.anhSanPham}
+                                          alt=""
+                                          className="w-8 h-8 rounded-md object-cover border border-slate-200 flex-shrink-0"
+                                          onError={(e) => { e.target.style.display = "none"; }}
+                                        />
+                                      ) : showImages ? (
+                                        <div className="w-8 h-8 rounded-md bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-xs flex-shrink-0">
+                                          📦
+                                        </div>
+                                      ) : null}
+                                      <div className="flex-1 min-w-0">
+                                        <h4 className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors truncate">
+                                          {p.tenSanPham}
+                                        </h4>
+                                        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
                                         {p.nhomHang && (
                                           <span className="text-[10px] font-medium text-slate-500 flex items-center gap-1 uppercase tracking-wider">
                                             <i className="ri-folder-line opacity-70" />
@@ -940,6 +969,7 @@ export default function InventoryPage({ user }) {
                                           <i className="ri-scales-line opacity-70" />
                                           {p.donViChan}
                                         </span>
+                                        </div>
                                       </div>
                                     </div>
                                     <div className="text-right flex-shrink-0">
@@ -1126,6 +1156,7 @@ export default function InventoryPage({ user }) {
                 >
                   Thêm vào phiếu
                 </button>
+              </div>
               </div>
             </div>
 

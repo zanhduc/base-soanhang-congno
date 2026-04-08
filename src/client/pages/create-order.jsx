@@ -7,8 +7,11 @@ import {
   getProductCatalog,
   formatAllSheets,
 } from "../api";
+import { runInBackground } from "../api/backgroundApi";
 import toast from "react-hot-toast";
 import { buildVietQrUrl } from "../utils/vietqr";
+import ImageUploader from "../components/ImageUploader";
+import { useUser } from "../context";
 import {
   formatMoney as fmt,
   normalizeText as foldText,
@@ -292,7 +295,7 @@ function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
           Ghi chú đơn hàng
         </label>
         <textarea
-          placeholder="Thêm ghi chú cho đơn hàng..."
+          placeholder="Nhập ghi chú..."
           value={orderInfo.ghiChu}
           maxLength={200}
           onChange={(e) => onUpdate({ ...orderInfo, ghiChu: e.target.value })}
@@ -304,7 +307,7 @@ function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
   );
 }
 
-function ProductListItem({ product, onUpdate, onRemove }) {
+function ProductListItem({ product, onUpdate, onRemove, showImages = false }) {
   const thanhTien = product.soLuong * product.donGiaBan;
   const subText = product.nhomHang
     ? `${product.nhomHang} • ${product.donVi || "Không xác định"}`
@@ -317,11 +320,31 @@ function ProductListItem({ product, onUpdate, onRemove }) {
   return (
     <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-4 md:p-5 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200 group">
       <div className="flex justify-between items-start mb-4">
-        <div className="flex-1 min-w-0">
-          <p className="font-bold text-slate-800 text-base md:text-lg truncate">
-            {product.tenSanPham}
-          </p>
-          <p className="text-sm text-slate-500 mt-0.5">{subText}</p>
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          {showImages && (
+            <div className="flex-shrink-0">
+              {product.anhSanPham ? (
+                <img
+                  src={product.anhSanPham}
+                  alt=""
+                  className="w-11 h-11 rounded-lg object-cover border border-slate-200"
+                  onError={(e) => {
+                    e.target.style.display = "none";
+                  }}
+                />
+              ) : (
+                <div className="w-11 h-11 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-lg">
+                  📦
+                </div>
+              )}
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="font-bold text-slate-800 text-base md:text-lg truncate">
+              {product.tenSanPham}
+            </p>
+            <p className="text-sm text-slate-500 mt-0.5">{subText}</p>
+          </div>
         </div>
         <button
           type="button"
@@ -344,7 +367,8 @@ function ProductListItem({ product, onUpdate, onRemove }) {
               onChange={(e) => {
                 const val =
                   e.target.value === "" ? "" : parseInt(e.target.value) || 0;
-                const maxVal = product.tonKhoMax !== undefined ? product.tonKhoMax : 100000;
+                const maxVal =
+                  product.tonKhoMax !== undefined ? product.tonKhoMax : 100000;
                 onUpdate({
                   soLuong: val === "" ? "" : Math.min(val, maxVal),
                 });
@@ -434,6 +458,7 @@ function OrderSummary({ totalAmount, totalItems }) {
 /*  Main Page  */
 
 export default function CreateOrderPage() {
+  const { user } = useUser();
   const [isCustomerMode, setIsCustomerMode] = useState(false);
   const [customerInfo, setCustomerInfo] = useState({
     tenKhach: "",
@@ -473,12 +498,14 @@ export default function CreateOrderPage() {
   const [newProduct, setNewProduct] = useState({
     id: "",
     tenSanPham: "",
+    anhSanPham: "",
     nhomHang: "",
     donVi: "",
     soLuong: 1,
     donGiaBan: 0,
     giaVon: 0,
   });
+  const [uploadingImage, setUploadingImage] = useState(false);
   const loadOrderDefaults = async ({ silent = false } = {}) => {
     const today = getTodayInputDate();
     if (!silent) setIsLoadingOrderDefaults(true);
@@ -617,6 +644,7 @@ export default function CreateOrderPage() {
     return {
       ...current,
       tenSanPham: tenSanPham || matched.tenSanPham || "",
+      anhSanPham: matched.anhSanPham || "",
       nhomHang: matched.nhomHang || "",
       donVi: matched.displayUnit || matched.donVi || "",
       donGiaBan: Number(matched.displayPrice ?? matched.donGiaBan ?? 0),
@@ -648,15 +676,23 @@ export default function CreateOrderPage() {
   const [showInventory, setShowInventory] = useState(
     () => localStorage.getItem("enable_inventory") === "true",
   );
+  const [showImages, setShowImages] = useState(
+    () => localStorage.getItem("show_product_images") !== "false",
+  );
 
   useEffect(() => {
     const handleSettingChange = (e) => setShowInventory(e.detail);
     window.addEventListener("inventory_setting_changed", handleSettingChange);
-    return () =>
+    const handleImageChange = () =>
+      setShowImages(localStorage.getItem("show_product_images") !== "false");
+    window.addEventListener("storage", handleImageChange);
+    return () => {
       window.removeEventListener(
         "inventory_setting_changed",
         handleSettingChange,
       );
+      window.removeEventListener("storage", handleImageChange);
+    };
   }, []);
 
   const handleAddProduct = () => {
@@ -687,17 +723,18 @@ export default function CreateOrderPage() {
 
         if (found) {
           normalizedProduct.donVi = found; // Smart formatting: lấy đúng format trong danh mục
-          
+
           const exactMatch = productCatalog.find(
             (p) =>
-              foldText(p.tenSanPham) === foldText(normalizedProduct.tenSanPham) &&
-              foldText(p.donVi) === foldText(found)
+              foldText(p.tenSanPham) ===
+                foldText(normalizedProduct.tenSanPham) &&
+              foldText(p.donVi) === foldText(found),
           );
-          
+
           if (exactMatch && exactMatch.tonKho !== undefined) {
             maxInventory = exactMatch.tonKho;
             if (normalizedProduct.soLuong > maxInventory) {
-               newErr.new_soLuong = `Kho chỉ còn ${maxInventory} ${found}`;
+              newErr.new_soLuong = `Kho chỉ còn ${maxInventory} ${found}`;
             }
           }
         } else {
@@ -722,7 +759,9 @@ export default function CreateOrderPage() {
         p.tenSanPham.trim().toLowerCase() ===
           normalizedProduct.tenSanPham.trim().toLowerCase() &&
         p.donVi.trim().toLowerCase() ===
-          String(normalizedProduct.donVi || "").trim().toLowerCase(),
+          String(normalizedProduct.donVi || "")
+            .trim()
+            .toLowerCase(),
     );
     if (isDuplicate) {
       newErr.new_tenSanPham = "Sản phẩm (kèm đơn vị) đã có trong đơn";
@@ -735,11 +774,16 @@ export default function CreateOrderPage() {
 
     setProducts([
       ...products,
-      { ...normalizedProduct, tonKhoMax: maxInventory, id: Date.now().toString() },
+      {
+        ...normalizedProduct,
+        tonKhoMax: maxInventory,
+        id: Date.now().toString(),
+      },
     ]);
     setNewProduct({
       id: "",
       tenSanPham: "",
+      anhSanPham: "",
       nhomHang: "",
       donVi: "",
       soLuong: 1,
@@ -807,6 +851,83 @@ export default function CreateOrderPage() {
     });
   };
 
+  const openReceiptPage = (maPhieu, size, isPreview = false, previewData = null) => {
+    if (!maPhieu) return;
+    const gasUrl = import.meta.env.VITE_GAS_WEBAPP_URL || "";
+    const isDev = import.meta.env.DEV;
+
+    let baseUrl = `${window.location.origin}${window.location.pathname}`;
+    if (!isDev) {
+      if (
+        document.referrer &&
+        document.referrer.includes("script.google.com")
+      ) {
+        baseUrl = document.referrer.split("?")[0].split("#")[0];
+      } else if (gasUrl) {
+        baseUrl = gasUrl;
+      }
+    }
+
+    let url = `${baseUrl}#print=${encodeURIComponent(maPhieu)}${size ? `&size=${size}` : ""}${isPreview ? "&preview=true" : ""}${previewData ? `&data=${encodeURIComponent(previewData)}` : ""}`;
+    const win = window.open(url, "_blank", "width=420,height=700");
+    if (!win) {
+      toast.error("Trình duyệt đang chặn cửa sổ in hóa đơn.");
+    }
+  };
+
+  const handlePrintPreview = () => {
+    if (!pendingOrder?.orderData) return;
+    const total = Number(pendingOrder.totalAmount || 0);
+
+    const statusLabel =
+      paymentStatus === "DEBT"
+        ? "Nợ"
+        : paymentStatus === "PARTIAL"
+          ? paymentMethod === "bank"
+            ? "Trả một phần QR"
+            : "Trả một phần"
+          : paymentMethod === "bank"
+            ? "Đã thanh toán QR"
+            : "Đã thanh toán";
+
+    const updatedOrderInfo = {
+      ...pendingOrder.orderData.orderInfo,
+      trangThaiCode: paymentStatus,
+      trangThai: statusLabel,
+      paymentMethod: paymentStatus === "DEBT" ? "" : paymentMethod || "",
+      soTienDaTra:
+        paymentStatus === "PARTIAL"
+          ? Number(partialAmount || 0)
+          : paymentStatus === "DEBT"
+            ? 0
+            : total,
+    };
+
+    const previewData = {
+      maPhieu: updatedOrderInfo.maPhieu,
+      ngayBan: updatedOrderInfo.ngayBan,
+      tenKhach: pendingOrder.orderData.customer?.tenKhach || "Khách ghé thăm",
+      soDienThoai: pendingOrder.orderData.customer?.soDienThoai || "",
+      ghiChu: updatedOrderInfo.ghiChu,
+      trangThai: updatedOrderInfo.trangThai,
+      tongHoaDon: total,
+      tienNo:
+        paymentStatus === "DEBT"
+          ? total
+          : paymentStatus === "PARTIAL"
+            ? Math.max(0, total - Number(partialAmount || 0))
+            : 0,
+      products: pendingOrder.orderData.products.map((p) => ({
+        tenSanPham: p.tenSanPham,
+        donVi: p.donVi,
+        soLuong: p.soLuong,
+        donGiaBan: p.donGiaBan,
+      })),
+    };
+
+    openReceiptPage(updatedOrderInfo.maPhieu, "58", true, JSON.stringify(previewData));
+  };
+
   const totalAmount = products.reduce(
     (sum, p) => sum + p.soLuong * p.donGiaBan,
     0,
@@ -822,7 +943,7 @@ export default function CreateOrderPage() {
     (Number(partialAmount || 0) > 0 &&
       Number(partialAmount || 0) <= pendingTotal);
 
-  const handleConfirmPayment = async () => {
+  const handleConfirmPayment = () => {
     if (!pendingOrder?.orderData) return;
     const total = Number(pendingOrder.totalAmount || 0);
 
@@ -841,100 +962,63 @@ export default function CreateOrderPage() {
       return toast.error("Chưa có thông tin ngân hàng để tạo QR");
     }
 
-    setIsSubmitting(true);
-    const savingToastId = toast.loading("Đang lưu đơn hàng...", {
-      duration: Infinity,
-    });
-    const rollbackSnapshot = {
-      products,
-      customerInfo,
-      orderInfo,
-      isCustomerMode,
-      pendingOrder,
-      paymentStatus,
-      paymentMethod,
-      partialAmount,
+    const statusLabel =
+      paymentStatus === "DEBT"
+        ? "Nợ"
+        : paymentStatus === "PARTIAL"
+          ? paymentMethod === "bank"
+            ? "Trả một phần QR"
+            : "Trả một phần"
+          : paymentMethod === "bank"
+            ? "Đã thanh toán QR"
+            : "Đã thanh toán";
+
+    const updatedOrderInfo = {
+      ...pendingOrder.orderData.orderInfo,
+      trangThaiCode: paymentStatus,
+      trangThai: statusLabel,
+      paymentMethod: paymentStatus === "DEBT" ? "" : paymentMethod || "",
+      soTienDaTra: paymentStatus === "PARTIAL" ? Number(partialAmount || 0) : 0,
     };
 
-    const restoreFromSnapshot = (snap) => {
-      setProducts(snap.products);
-      setCustomerInfo(snap.customerInfo);
-      setOrderInfo(snap.orderInfo);
-      setIsCustomerMode(snap.isCustomerMode);
-      setPendingOrder(snap.pendingOrder);
-      setPaymentStatus(snap.paymentStatus);
-      setPaymentMethod(snap.paymentMethod);
-      setPartialAmount(snap.partialAmount);
-      setShowPaymentModal(true);
+    const orderData = {
+      ...pendingOrder.orderData,
+      orderInfo: updatedOrderInfo,
     };
 
-    try {
-      const statusLabel =
-        paymentStatus === "DEBT"
-          ? "Nợ"
-          : paymentStatus === "PARTIAL"
-            ? paymentMethod === "bank"
-              ? "Trả một phần QR"
-              : "Trả một phần"
-            : paymentMethod === "bank"
-              ? "Đã thanh toán QR"
-              : "Đã thanh toán";
+    const confirmMsg = "Bạn có chắc chắn muốn xác nhận thanh toán và tạo đơn?";
 
-      const updatedOrderInfo = {
-        ...pendingOrder.orderData.orderInfo,
-        trangThaiCode: paymentStatus,
-        trangThai: statusLabel,
-        paymentMethod: paymentStatus === "DEBT" ? "" : paymentMethod || "",
-        soTienDaTra:
-          paymentStatus === "PARTIAL" ? Number(partialAmount || 0) : 0,
-      };
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
 
-      const orderData = {
-        ...pendingOrder.orderData,
-        orderInfo: updatedOrderInfo,
-      };
+    const maPhieu = orderData.orderInfo?.maPhieu || "";
 
-      // Optimistic UI: clear form immediately so interaction feels instant.
-      closePaymentModal();
-      setProducts([]);
-      setCustomerInfo({ tenKhach: "", soDienThoai: "" });
-      setOrderInfo(createInitialOrderInfo());
-      setIsCustomerMode(false);
-      const result = await createOrder(orderData);
+    // Optimistic UI: clear form immediately, toast success, API runs in background
+    closePaymentModal();
+    setProducts([]);
+    setCustomerInfo({ tenKhach: "", soDienThoai: "" });
+    setOrderInfo(createInitialOrderInfo());
+    setIsCustomerMode(false);
+    setIsSubmitting(false);
 
-      if (result?.success) {
-        toast.success(
-          result?.queued
-            ? result.message || "Đơn đã vào hàng đợi, đang xử lý trong nền."
-            : result.message || "Đơn hàng được tạo thành công!",
-          { id: savingToastId, duration: 5000 },
-        );
-        // Fire-and-forget: reload data in background without blocking UI
+    runInBackground({
+      apiCall: () => createOrder(orderData),
+      successMessage: "Đơn hàng được tạo thành công!",
+      changeDescription: `Tạo đơn hàng "${maPhieu}"`,
+      userName: user?.name || user?.email || "unknown",
+      onComplete: (result) => {
+        // Reload data in background regardless of result
         Promise.all([
           loadOrderDefaults(),
           loadProductCatalog(),
           loadCustomerCatalog(),
         ]).catch(() => {});
-        try {
-          if (!result?.queued) formatAllSheets().catch(() => {});
-        } catch (e) {}
-      } else {
-        restoreFromSnapshot(rollbackSnapshot);
-        toast.error(
-          result?.message || "Lưu đơn thất bại, dữ liệu đã được khôi phục.",
-          { id: savingToastId, duration: 5000 },
-        );
-      }
-    } catch (err) {
-      restoreFromSnapshot(rollbackSnapshot);
-      console.error("Submit error:", err);
-      toast.error("Lỗi kết nối, dữ liệu đã được khôi phục: " + err.message, {
-        id: savingToastId,
-        duration: 5000,
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
+        if (result?.success && !result?.queued) {
+          formatAllSheets().catch(() => {});
+        }
+      },
+    });
   };
 
   const inputCls = (hasError) =>
@@ -962,10 +1046,6 @@ export default function CreateOrderPage() {
               Hàng
             </h2>
           </div>
-          <p className="text-sm md:text-base text-slate-500 max-w-md leading-relaxed font-medium">
-            Soạn đơn hàng nhanh chóng, thêm sản phẩm, số lượng, giá bán và gửi
-            đơn chỉ trong vài bước.
-          </p>
         </div>
 
         {/* Form */}
@@ -1026,351 +1106,407 @@ export default function CreateOrderPage() {
             </div>
 
             {/* Order Info */}
-            <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200">
-              <h3 className="font-bold text-base md:text-lg text-slate-800 mb-4">
-                Thông tin đơn hàng
-              </h3>
-              <OrderInfoSection
-                orderInfo={orderInfo}
-                onUpdate={setOrderInfo}
-                isLoadingDefaults={isLoadingOrderDefaults}
-              />
+            <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 shadow-sm hover:shadow-md transition-all duration-300 hover:border-slate-200 overflow-hidden">
+              <div className="bg-rose-50/80 border-b border-rose-100/50 px-5 py-4 flex items-center gap-2.5">
+                <div className="w-1.5 h-4 rounded-full bg-rose-600 shadow-sm"></div>
+                <h3 className="font-bold text-sm md:text-base text-rose-800 uppercase tracking-widest mt-0.5">
+                  Thông tin đơn hàng
+                </h3>
+              </div>
+              <div className="p-5 md:p-6 pt-5">
+                <OrderInfoSection
+                  orderInfo={orderInfo}
+                  onUpdate={setOrderInfo}
+                  isLoadingDefaults={isLoadingOrderDefaults}
+                />
+              </div>
             </div>
 
             {/* Add Product Form */}
-            <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 p-5 md:p-6 space-y-4 md:space-y-5 shadow-sm hover:shadow-md transition-all duration-300">
-              <div>
-                <h3 className="font-bold text-base md:text-lg text-slate-800 mb-0.5">
+            <div className="rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-white/80 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden">
+              <div className="bg-rose-50/80 border-b border-rose-100/50 px-5 py-4 flex items-center gap-2.5">
+                <div className="w-1.5 h-4 rounded-full bg-rose-600 shadow-sm"></div>
+                <h3 className="font-bold text-sm md:text-base text-rose-800 uppercase tracking-widest mt-0.5">
                   Thêm vào đơn
                 </h3>
-                <p className="text-xs text-slate-500">
-                  Nhập tên hàng, số lượng và giá bán
-                </p>
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    Tên hàng <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="Ví dụ: áo phông trắng, Quần jean..."
-                      value={newProduct.tenSanPham}
-                      maxLength={200}
-                      onFocus={() => setShowProductSuggestions(true)}
-                      onBlur={() => {
-                        const titleName = toTitleCase(newProduct.tenSanPham);
-                        if (titleName !== newProduct.tenSanPham) {
-                          setNewProduct((prev) => ({
-                            ...prev,
-                            tenSanPham: titleName,
-                          }));
-                        }
-                        setTimeout(() => setShowProductSuggestions(false), 120);
-                        const matched = getCatalogMatch(titleName);
-                        if (!matched) return;
-                        setNewProduct((prev) => {
-                          // Nếu tên đã chuẩn và đã có đơn vị (variant đã chọn), không được đè lại
-                          if (
-                            foldText(prev.tenSanPham) === foldText(titleName) &&
-                            prev.donVi
-                          ) {
-                            return prev;
-                          }
-                          return applyMatchedProduct(prev, titleName, matched);
-                        });
-                      }}
-                      onChange={(e) => {
-                        const tenSanPham = e.target.value;
-                        const matched = getCatalogMatch(tenSanPham);
-                        setNewProduct((prev) => {
-                          // Tương tự: nếu đang gõ mà tên vẫn khớp cái cũ và đã có đơn vị, đừng đè
-                          if (
-                            foldText(prev.tenSanPham) ===
-                              foldText(tenSanPham) &&
-                            prev.donVi
-                          ) {
-                            return { ...prev, tenSanPham };
-                          }
-                          return applyMatchedProduct(prev, tenSanPham, matched);
-                        });
-                        if (errors.new_tenSanPham)
-                          setErrors((p) => {
-                            const { new_tenSanPham, ...rest } = p;
-                            return rest;
-                          });
-                      }}
-                      className={inputCls(!!errors.new_tenSanPham)}
-                    />
-                    {errors.new_tenSanPham && (
-                      <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
-                        {errors.new_tenSanPham}
-                      </p>
-                    )}
-                    {showProductSuggestions &&
-                      getCatalogSuggestions(newProduct.tenSanPham).length >
-                        0 && (
-                        <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
-                          {getCatalogSuggestions(newProduct.tenSanPham).map(
-                            (p) => (
-                              <button
-                                key={
-                                  p.variantKey || `${p.tenSanPham}-${p.donVi}`
-                                }
-                                type="button"
-                                className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-rose-50"
-                                onMouseDown={(ev) => ev.preventDefault()}
-                                onClick={() => {
-                                  setNewProduct((prev) =>
-                                    applyMatchedProduct(
-                                      prev,
-                                      p.tenSanPham || "",
-                                      p,
-                                    ),
-                                  );
-                                  setShowProductSuggestions(false);
-                                }}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <p className="text-sm font-semibold text-slate-800">
-                                    {p.tenSanPham}
-                                  </p>
-                                  {p.hasChanLeInfo && (
-                                    <span
-                                      className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold uppercase ${p.isChan ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}
-                                    >
-                                      {p.isChan ? "Chẵn" : "Lẻ"}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-xs text-slate-500 mt-1">
-                                  {p.nhomHang || "-"} • {p.displayUnit || "-"} •
-                                  Giá {fmt(p.displayPrice || 0)}
-                                  {showInventory &&
-                                    ` • Tồn: ${p.tonKho || 0} ${p.displayUnit}`}
-                                </p>
-                              </button>
-                            ),
-                          )}
-                        </div>
-                      )}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    Nhóm hàng
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Nước, Bánh kẹo, Đồ đóng gói..."
-                    value={newProduct.nhomHang}
-                    maxLength={50}
-                    onChange={(e) =>
-                      setNewProduct((prev) => ({
-                        ...prev,
-                        nhomHang: e.target.value,
-                      }))
-                    }
-                    onBlur={() =>
-                      setNewProduct((prev) => ({
-                        ...prev,
-                        nhomHang: toTitleCase(prev.nhomHang),
-                      }))
-                    }
-                    className={inputCls(false)}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3 md:gap-4">
+              <div className="p-5 md:p-6 pt-5 space-y-4 md:space-y-5">
+                <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      Đơn vị <span className="text-rose-500">*</span>
+                      Tên hàng <span className="text-rose-500">*</span>
                     </label>
                     <div className="relative">
                       <input
                         type="text"
-                        placeholder="cái, bộ, chiếc..."
-                        value={newProduct.donVi}
-                        maxLength={20}
-                        onFocus={() => setShowUnitSuggestions(true)}
+                        placeholder="Ví dụ: áo phông trắng, Quần jean..."
+                        value={newProduct.tenSanPham}
+                        maxLength={200}
+                        onFocus={() => setShowProductSuggestions(true)}
+                        onBlur={() => {
+                          const titleName = toTitleCase(newProduct.tenSanPham);
+                          if (titleName !== newProduct.tenSanPham) {
+                            setNewProduct((prev) => ({
+                              ...prev,
+                              tenSanPham: titleName,
+                            }));
+                          }
+                          setTimeout(
+                            () => setShowProductSuggestions(false),
+                            120,
+                          );
+                          const matched = getCatalogMatch(titleName);
+                          if (!matched) return;
+                          setNewProduct((prev) => {
+                            // Nếu tên đã chuẩn và đã có đơn vị (variant đã chọn), không được đè lại
+                            if (
+                              foldText(prev.tenSanPham) ===
+                                foldText(titleName) &&
+                              prev.donVi
+                            ) {
+                              return prev;
+                            }
+                            return applyMatchedProduct(
+                              prev,
+                              titleName,
+                              matched,
+                            );
+                          });
+                        }}
                         onChange={(e) => {
-                          setNewProduct((prev) => ({
-                            ...prev,
-                            donVi: e.target.value,
-                          }));
-                          if (errors.new_donVi)
+                          const tenSanPham = e.target.value;
+                          const matched = getCatalogMatch(tenSanPham);
+                          setNewProduct((prev) => {
+                            // Tương tự: nếu đang gõ mà tên vẫn khớp cái cũ và đã có đơn vị, đừng đè
+                            if (
+                              foldText(prev.tenSanPham) ===
+                                foldText(tenSanPham) &&
+                              prev.donVi
+                            ) {
+                              return { ...prev, tenSanPham };
+                            }
+                            return applyMatchedProduct(
+                              prev,
+                              tenSanPham,
+                              matched,
+                            );
+                          });
+                          if (errors.new_tenSanPham)
                             setErrors((p) => {
-                              const { new_donVi, ...rest } = p;
+                              const { new_tenSanPham, ...rest } = p;
                               return rest;
                             });
                         }}
-                        onBlur={() => {
-                          const matched = getCatalogMatch(
-                            newProduct.tenSanPham,
-                          );
-                          setNewProduct((prev) => {
-                            const inputVal = String(prev.donVi || "").trim();
-                            if (showInventory && matched) {
-                              const found = [
-                                matched.donVi,
-                                matched.donViLon,
-                                matched.donViNho,
-                              ]
-                                .filter(Boolean)
-                                .find(
-                                  (u) =>
-                                    u.toLowerCase() === inputVal.toLowerCase(),
-                                );
-                              if (found) return { ...prev, donVi: found };
-                            }
-                            return { ...prev, donVi: toTitleCase(inputVal) };
-                          });
-                          setTimeout(() => setShowUnitSuggestions(false), 200);
-                        }}
-                        className={inputCls(!!errors.new_donVi)}
+                        className={inputCls(!!errors.new_tenSanPham)}
                       />
-                      {errors.new_donVi && (
+                      {errors.new_tenSanPham && (
                         <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
-                          {errors.new_donVi}
+                          {errors.new_tenSanPham}
                         </p>
                       )}
-
-                      {showUnitSuggestions &&
-                        showInventory &&
-                        getCatalogMatch(newProduct.tenSanPham) && (
-                          <div className="absolute top-full left-0 right-0 z-[60] mt-2 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
-                            <div className="p-2 space-y-1">
-                              {[
-                                getCatalogMatch(newProduct.tenSanPham).donVi,
-                                getCatalogMatch(newProduct.tenSanPham).donViLon,
-                              ]
-                                .filter(Boolean)
-                                .map((u, idx) => (
-                                  <button
-                                    key={idx}
-                                    type="button"
-                                    onClick={() => {
-                                      setNewProduct((prev) => ({
-                                        ...prev,
-                                        donVi: u,
-                                      }));
-                                      setErrors((p) => {
-                                        const { new_donVi, ...rest } = p;
-                                        return rest;
-                                      });
-                                      setShowUnitSuggestions(false);
-                                    }}
-                                    className="w-full text-left p-3 rounded-xl hover:bg-slate-50 transition-colors duration-200 text-sm font-medium text-slate-700"
-                                  >
-                                    {u}
-                                  </button>
-                                ))}
-                            </div>
+                      {showProductSuggestions &&
+                        getCatalogSuggestions(newProduct.tenSanPham).length >
+                          0 && (
+                          <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+                            {getCatalogSuggestions(newProduct.tenSanPham).map(
+                              (p) => (
+                                <button
+                                  key={
+                                    p.variantKey || `${p.tenSanPham}-${p.donVi}`
+                                  }
+                                  type="button"
+                                  className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-rose-50"
+                                  onMouseDown={(ev) => ev.preventDefault()}
+                                  onClick={() => {
+                                    setNewProduct((prev) =>
+                                      applyMatchedProduct(
+                                        prev,
+                                        p.tenSanPham || "",
+                                        p,
+                                      ),
+                                    );
+                                    setShowProductSuggestions(false);
+                                  }}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                                      {showImages && p.anhSanPham ? (
+                                        <img
+                                          src={p.anhSanPham}
+                                          alt=""
+                                          className="w-8 h-8 rounded-md object-cover border border-slate-200 flex-shrink-0"
+                                          onError={(e) => {
+                                            e.target.style.display = "none";
+                                          }}
+                                        />
+                                      ) : showImages ? (
+                                        <div className="w-8 h-8 rounded-md bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-xs flex-shrink-0">
+                                          📦
+                                        </div>
+                                      ) : null}
+                                      <p className="text-sm font-semibold text-slate-800 truncate">
+                                        {p.tenSanPham}
+                                      </p>
+                                    </div>
+                                    {p.hasChanLeInfo && (
+                                      <span
+                                        className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold uppercase flex-shrink-0 ${p.isChan ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}
+                                      >
+                                        {p.isChan ? "Chẵn" : "Lẻ"}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-1">
+                                    {p.nhomHang || "-"} • {p.displayUnit || "-"}{" "}
+                                    • Giá {fmt(p.displayPrice || 0)}
+                                    {showInventory &&
+                                      ` • Tồn: ${p.tonKho || 0} ${p.displayUnit}`}
+                                  </p>
+                                </button>
+                              ),
+                            )}
                           </div>
                         )}
                     </div>
                   </div>
+                  {showImages && (
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-800 mb-2">
+                        Ảnh sản phẩm
+                      </label>
+                      <ImageUploader
+                        currentUrl={newProduct.anhSanPham}
+                        onUploaded={(url) =>
+                          setNewProduct((prev) => ({
+                            ...prev,
+                            anhSanPham: url,
+                          }))
+                        }
+                        uploading={uploadingImage}
+                        setUploading={setUploadingImage}
+                      />
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      Số lượng <span className="text-rose-500">*</span>
+                      Nhóm hàng
                     </label>
                     <input
-                      type="number"
-                      placeholder="1"
-                      min="0"
-                      value={newProduct.soLuong}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        const num = val === "" ? "" : parseInt(val) || 0;
+                      type="text"
+                      placeholder="Nước, Bánh kẹo, Đồ đóng gói..."
+                      value={newProduct.nhomHang}
+                      maxLength={50}
+                      onChange={(e) =>
                         setNewProduct((prev) => ({
                           ...prev,
-                          soLuong: num === "" ? "" : Math.min(num, 100000),
-                        }));
-                        if (errors.new_soLuong)
+                          nhomHang: e.target.value,
+                        }))
+                      }
+                      onBlur={() =>
+                        setNewProduct((prev) => ({
+                          ...prev,
+                          nhomHang: toTitleCase(prev.nhomHang),
+                        }))
+                      }
+                      className={inputCls(false)}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 md:gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-800 mb-2">
+                        Đơn vị <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="cái, bộ, chiếc..."
+                          value={newProduct.donVi}
+                          maxLength={20}
+                          onFocus={() => setShowUnitSuggestions(true)}
+                          onChange={(e) => {
+                            setNewProduct((prev) => ({
+                              ...prev,
+                              donVi: e.target.value,
+                            }));
+                            if (errors.new_donVi)
+                              setErrors((p) => {
+                                const { new_donVi, ...rest } = p;
+                                return rest;
+                              });
+                          }}
+                          onBlur={() => {
+                            const matched = getCatalogMatch(
+                              newProduct.tenSanPham,
+                            );
+                            setNewProduct((prev) => {
+                              const inputVal = String(prev.donVi || "").trim();
+                              if (showInventory && matched) {
+                                const found = [
+                                  matched.donVi,
+                                  matched.donViLon,
+                                  matched.donViNho,
+                                ]
+                                  .filter(Boolean)
+                                  .find(
+                                    (u) =>
+                                      u.toLowerCase() ===
+                                      inputVal.toLowerCase(),
+                                  );
+                                if (found) return { ...prev, donVi: found };
+                              }
+                              return { ...prev, donVi: toTitleCase(inputVal) };
+                            });
+                            setTimeout(
+                              () => setShowUnitSuggestions(false),
+                              200,
+                            );
+                          }}
+                          className={inputCls(!!errors.new_donVi)}
+                        />
+                        {errors.new_donVi && (
+                          <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                            {errors.new_donVi}
+                          </p>
+                        )}
+
+                        {showUnitSuggestions &&
+                          showInventory &&
+                          getCatalogMatch(newProduct.tenSanPham) && (
+                            <div className="absolute top-full left-0 right-0 z-[60] mt-2 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
+                              <div className="p-2 space-y-1">
+                                {[
+                                  getCatalogMatch(newProduct.tenSanPham).donVi,
+                                  getCatalogMatch(newProduct.tenSanPham)
+                                    .donViLon,
+                                ]
+                                  .filter(Boolean)
+                                  .map((u, idx) => (
+                                    <button
+                                      key={idx}
+                                      type="button"
+                                      onClick={() => {
+                                        setNewProduct((prev) => ({
+                                          ...prev,
+                                          donVi: u,
+                                        }));
+                                        setErrors((p) => {
+                                          const { new_donVi, ...rest } = p;
+                                          return rest;
+                                        });
+                                        setShowUnitSuggestions(false);
+                                      }}
+                                      className="w-full text-left p-3 rounded-xl hover:bg-slate-50 transition-colors duration-200 text-sm font-medium text-slate-700"
+                                    >
+                                      {u}
+                                    </button>
+                                  ))}
+                              </div>
+                            </div>
+                          )}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-800 mb-2">
+                        Số lượng <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="1"
+                        min="0"
+                        value={newProduct.soLuong}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const num = val === "" ? "" : parseInt(val) || 0;
+                          setNewProduct((prev) => ({
+                            ...prev,
+                            soLuong: num === "" ? "" : Math.min(num, 100000),
+                          }));
+                          if (errors.new_soLuong)
+                            setErrors((p) => {
+                              const { new_soLuong, ...rest } = p;
+                              return rest;
+                            });
+                        }}
+                        onBlur={() => {
+                          setNewProduct((prev) => {
+                            if (prev.soLuong === "" || prev.soLuong < 1)
+                              return { ...prev, soLuong: 1 };
+                            return prev;
+                          });
+                        }}
+                        className={inputCls(!!errors.new_soLuong)}
+                      />
+                      {errors.new_soLuong && (
+                        <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                          {errors.new_soLuong}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Đơn giá bán <span className="text-rose-500">*</span>
+                    </label>
+                    <CurrencyInput
+                      value={newProduct.donGiaBan}
+                      onChange={(v) => {
+                        setNewProduct((prev) => ({ ...prev, donGiaBan: v }));
+                        if (errors.new_donGiaBan)
                           setErrors((p) => {
-                            const { new_soLuong, ...rest } = p;
+                            const { new_donGiaBan, ...rest } = p;
                             return rest;
                           });
                       }}
-                      onBlur={() => {
-                        setNewProduct((prev) => {
-                          if (prev.soLuong === "" || prev.soLuong < 1)
-                            return { ...prev, soLuong: 1 };
-                          return prev;
-                        });
-                      }}
-                      className={inputCls(!!errors.new_soLuong)}
+                      className={inputCls(!!errors.new_donGiaBan)}
                     />
-                    {errors.new_soLuong && (
+                    {errors.new_donGiaBan && (
                       <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
-                        {errors.new_soLuong}
+                        {errors.new_donGiaBan}
                       </p>
                     )}
                   </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Giá vốn
+                    </label>
+                    <CurrencyInput
+                      value={newProduct.giaVon || 0}
+                      onChange={(v) => {
+                        if (
+                          v > 0 &&
+                          newProduct.donGiaBan > 0 &&
+                          v > newProduct.donGiaBan
+                        ) {
+                          setNewProduct((prev) => ({
+                            ...prev,
+                            giaVon: prev.donGiaBan,
+                          }));
+                        } else {
+                          setNewProduct((prev) => ({ ...prev, giaVon: v }));
+                        }
+                        if (errors.new_giaVon)
+                          setErrors((p) => {
+                            const { new_giaVon, ...rest } = p;
+                            return rest;
+                          });
+                      }}
+                      className={inputCls(!!errors.new_giaVon)}
+                    />
+                    {errors.new_giaVon && (
+                      <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
+                        {errors.new_giaVon}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddProduct}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-700 to-rose-500 px-4 py-3 font-semibold text-white hover:shadow-lg hover:shadow-rose-700/25 transition-all duration-300 active:scale-95"
+                  >
+                    Thêm vào đơn
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    Đơn giá bán <span className="text-rose-500">*</span>
-                  </label>
-                  <CurrencyInput
-                    value={newProduct.donGiaBan}
-                    onChange={(v) => {
-                      setNewProduct((prev) => ({ ...prev, donGiaBan: v }));
-                      if (errors.new_donGiaBan)
-                        setErrors((p) => {
-                          const { new_donGiaBan, ...rest } = p;
-                          return rest;
-                        });
-                    }}
-                    className={inputCls(!!errors.new_donGiaBan)}
-                  />
-                  {errors.new_donGiaBan && (
-                    <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
-                      {errors.new_donGiaBan}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    Giá vốn
-                  </label>
-                  <CurrencyInput
-                    value={newProduct.giaVon || 0}
-                    onChange={(v) => {
-                      if (
-                        v > 0 &&
-                        newProduct.donGiaBan > 0 &&
-                        v > newProduct.donGiaBan
-                      ) {
-                        setNewProduct((prev) => ({
-                          ...prev,
-                          giaVon: prev.donGiaBan,
-                        }));
-                      } else {
-                        setNewProduct((prev) => ({ ...prev, giaVon: v }));
-                      }
-                      if (errors.new_giaVon)
-                        setErrors((p) => {
-                          const { new_giaVon, ...rest } = p;
-                          return rest;
-                        });
-                    }}
-                    className={inputCls(!!errors.new_giaVon)}
-                  />
-                  {errors.new_giaVon && (
-                    <p className="mt-1 text-[10px] font-semibold text-rose-600 ml-1">
-                      {errors.new_giaVon}
-                    </p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={handleAddProduct}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-700 to-rose-500 px-4 py-3 font-semibold text-white hover:shadow-lg hover:shadow-rose-700/25 transition-all duration-300 active:scale-95"
-                >
-                  Thêm vào đơn
-                </button>
               </div>
             </div>
 
@@ -1395,6 +1531,7 @@ export default function CreateOrderPage() {
                     <ProductListItem
                       key={product.id}
                       product={product}
+                      showImages={showImages}
                       onUpdate={(updated) =>
                         handleUpdateProduct(product.id, updated)
                       }
@@ -1443,6 +1580,7 @@ export default function CreateOrderPage() {
                   <ProductListItem
                     key={`desktop-${product.id}`}
                     product={product}
+                    showImages={showImages}
                     onUpdate={(updated) =>
                       handleUpdateProduct(product.id, updated)
                     }
@@ -1660,6 +1798,13 @@ export default function CreateOrderPage() {
                 className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
               >
                 Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handlePrintPreview}
+                className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 transition-all"
+              >
+                In hóa đơn
               </button>
               <button
                 type="button"

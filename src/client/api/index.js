@@ -38,3 +38,5 @@ export const setAppSetting = adapter.setAppSetting;
 export const getSupplierDebts = adapter.getSupplierDebts;
 export const updateSupplierDebt = adapter.updateSupplierDebt;
 export const formatAllSheets = adapter.formatAllSheets;
+export const uploadImageToImgBB = adapter.uploadImageToImgBB;
+export const logAction = adapter.logAction;

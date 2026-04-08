@@ -10,8 +10,10 @@ import {
   getReceiptHistory,
   formatAllSheets,
 } from "../api";
+import { runInBackground } from "../api/backgroundApi";
 import toast from "react-hot-toast";
 import { buildVietQrUrl } from "../utils/vietqr";
+import { useUser } from "../context";
 import {
   formatMoney as fmt,
   parseNumber as toNum,
@@ -36,23 +38,38 @@ const openReceiptPage = (order, size) => {
   }
   const gasUrl = import.meta.env.VITE_GAS_WEBAPP_URL || "";
   const isPdf = size === "pdf";
-  // Luôn ưu tiên dùng GAS deployment URL để tránh lỗi cross-origin trên iframe sandbox
-  const baseUrl =
-    gasUrl || `${window.location.origin}${window.location.pathname}`;
-  if (isPdf && !gasUrl) {
+  const isDev = import.meta.env.DEV;
+
+  // Với in nhiệt (SPA route), ưu tiên dùng local URL khi đang dev để test dễ dàng.
+  // Nếu trên GAS (production/test dev), lấy dynamic parent URL từ document.referrer để luôn cùng phiên bản với trang hiện tại.
+  let baseUrl = `${window.location.origin}${window.location.pathname}`;
+  if (!isDev) {
+    if (document.referrer && document.referrer.includes("script.google.com")) {
+      baseUrl = document.referrer.split("?")[0].split("#")[0];
+    } else if (gasUrl) {
+      baseUrl = gasUrl;
+    }
+  }
+  
+  if (isPdf && !gasUrl && !isDev) {
     toast.error("Thiếu VITE_GAS_WEBAPP_URL để mở PDF.");
     return;
   }
   const sizeParam =
     size === "58"
-      ? "&size=58"
+      ? "58"
       : size === "80"
-        ? "&size=80"
+        ? "80"
         : size === "pdf"
-          ? "&size=pdf"
+          ? "pdf"
           : "";
-  const keyParam = isPdf ? "printPdf" : "print";
-  const url = `${baseUrl}?${keyParam}=${encodeURIComponent(maPhieu)}${sizeParam}`;
+
+  let url;
+  if (isPdf) {
+    url = `${baseUrl}?printPdf=${encodeURIComponent(maPhieu)}${sizeParam ? `&size=${sizeParam}` : ""}`;
+  } else {
+    url = `${baseUrl}#print=${encodeURIComponent(maPhieu)}${sizeParam ? `&size=${sizeParam}` : ""}`;
+  }
   const win = window.open(url, "_blank", "width=420,height=700");
   if (!win) {
     toast.error("Trình duyệt đang chặn cửa sổ in hóa đơn.");
@@ -346,9 +363,12 @@ function HistoryCard({ order, deleting, onEdit, onDelete, bankConfig }) {
             className="mx-auto mt-[18vh] w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-bold text-slate-900">
-              Chọn kiểu in hóa đơn
-            </h3>
+            <div className="flex items-center gap-2.5 mb-2">
+              <div className="w-1.5 h-5 rounded-full bg-rose-600 shadow-sm mt-0.5"></div>
+              <h3 className="text-base font-black text-slate-900 tracking-tight">
+                Chọn kiểu in hóa đơn
+              </h3>
+            </div>
             <p className="mt-1 text-sm text-slate-500">
               Mã phiếu: {order.maPhieu}
             </p>
@@ -405,9 +425,12 @@ function HistoryCard({ order, deleting, onEdit, onDelete, bankConfig }) {
             className="mx-auto mt-[10vh] w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-bold text-slate-900">
-              QR Chuyển khoản
-            </h3>
+            <div className="flex items-center gap-2.5 mb-2">
+              <div className="w-1.5 h-5 rounded-full bg-rose-600 shadow-sm mt-0.5"></div>
+              <h3 className="text-base font-black text-slate-900 tracking-tight">
+                QR Chuyển khoản
+              </h3>
+            </div>
             <p className="mt-1 text-sm text-slate-500">
               Mã phiếu: {order.maPhieu}
             </p>
@@ -565,9 +588,12 @@ function EditOrderModal({
       >
         <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 md:px-5">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="text-base md:text-lg font-bold text-slate-900">
-              Sửa hóa đơn {order.maPhieu}
-            </h3>
+            <div className="flex items-center gap-2.5 mb-1">
+              <div className="w-1.5 h-5 rounded-full bg-rose-600 shadow-sm mt-0.5"></div>
+              <h3 className="text-base md:text-lg font-black text-slate-900 tracking-tight">
+                Sửa hóa đơn {order.maPhieu}
+              </h3>
+            </div>
             <button
               type="button"
               onClick={onClose}
@@ -1255,6 +1281,7 @@ function ReceiptHistoryCard({ receipt }) {
 }
 
 export default function HistoryPage() {
+  const { user } = useUser();
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("orders");
   const [orders, setOrders] = useState([]);
@@ -1651,76 +1678,32 @@ export default function HistoryPage() {
     setDeleteTarget({ maPhieu: key });
   };
 
-  const confirmDeleteOrder = async () => {
+  const confirmDeleteOrder = () => {
     const key = String(deleteTarget?.maPhieu || "").trim();
     if (!key) return;
-    setDeletingCode(key);
-    const toastId = toast.loading("Đang xóa hóa đơn...", {
-      duration: Infinity,
+
+    // Optimistic UI: remove from list immediately
+    setOrders((prev) =>
+      prev.filter((o) => String(o?.maPhieu || "").trim() !== key),
+    );
+    setDeleteTarget(null);
+    setDeletingCode("");
+
+    runInBackground({
+      apiCall: () => deleteOrder(key),
+      successMessage: `Đã xóa hóa đơn ${key}`,
+      changeDescription: `Xóa hóa đơn "${key}"`,
+      userName: user?.name || user?.email || "unknown",
+      onComplete: (result) => {
+        if (result?.success && !result?.queued) {
+          formatAllSheets().catch(() => {});
+        }
+        loadHistory().catch(() => {});
+      },
     });
-    try {
-      const res = await deleteOrder(key);
-      if (res?.success) {
-        if (res?.queued) {
-          toast.success(
-            res.message || "Yêu cầu xóa đã vào hàng đợi, đang xử lý trong nền.",
-            { id: toastId, duration: 5000 },
-          );
-          setDeleteTarget(null);
-          // Queue có độ trễ; thử tự refresh vài lần để UI bắt kịp trạng thái xóa thật.
-          (async () => {
-            for (let i = 0; i < 4; i++) {
-              await new Promise((resolve) => setTimeout(resolve, 1500));
-              try {
-                const latest = await getOrderHistory();
-                if (latest?.success && Array.isArray(latest.data)) {
-                  setOrders(latest.data);
-                  const stillExists = latest.data.some(
-                    (o) => String(o?.maPhieu || "").trim() === key,
-                  );
-                  if (!stillExists) return;
-                }
-              } catch (e) {
-                // noop
-              }
-            }
-          })();
-        } else {
-          toast.success(res.message || "Đã xóa hóa đơn", {
-            id: toastId,
-            duration: 5000,
-          });
-          try { formatAllSheets().catch(() => {}); } catch (e) {}
-          setDeleteTarget(null);
-          await loadHistory();
-        }
-      } else {
-        const msg = String(res?.message || "");
-        if (msg.includes("Không tìm thấy hóa đơn")) {
-          setOrders((prev) =>
-            prev.filter((o) => String(o?.maPhieu || "").trim() !== key),
-          );
-          setDeleteTarget(null);
-          toast.success("Hóa đơn đã không còn tồn tại (đã được xóa trước đó).", {
-            id: toastId,
-            duration: 5000,
-          });
-        } else {
-          toast.error(msg || "Xóa hóa đơn thất bại", {
-            id: toastId,
-            duration: 5000,
-          });
-        }
-      }
-    } catch (e) {
-      const errMsg = e?.message ? `Xóa hóa đơn thất bại: ${e.message}` : "Xóa hóa đơn thất bại";
-      toast.error(errMsg, { id: toastId, duration: 5000 });
-    } finally {
-      setDeletingCode("");
-    }
   };
 
-  const handleSaveOrder = async (form, total) => {
+  const handleSaveOrder = (form, total) => {
     const maPhieu = String(form.maPhieu || "").trim();
     if (!maPhieu) return toast.error("Mã phiếu không được để trống");
 
@@ -1743,11 +1726,6 @@ export default function HistoryPage() {
         return toast.error("Số tiền đã trả không được lớn hơn tổng hóa đơn");
     }
 
-    // Snapshot for rollback
-    const ordersSnapshot = orders;
-    const editingSnapshot = editingOrder;
-
-    // Build optimistic order update
     const statusLabel =
       form.trangThaiCode === "DEBT"
         ? "Nợ"
@@ -1788,55 +1766,36 @@ export default function HistoryPage() {
       ),
     );
     setEditingOrder(null);
+    setSavingOrder(false);
 
-    setSavingOrder(true);
-    const toastId = toast.loading("Đang lưu thay đổi...", { duration: Infinity });
+    const payload = {
+      maPhieuOriginal: form.maPhieuOriginal,
+      customer: {
+        tenKhach: String(form.tenKhach || "").trim(),
+        soDienThoai: String(form.soDienThoai || "").trim(),
+      },
+      orderInfo: {
+        maPhieu,
+        ngayBan: form.ngayBan || "",
+        trangThaiCode: form.trangThaiCode || "PAID",
+        soTienDaTra,
+        ghiChu: String(form.ghiChu || "-").trim() || "-",
+      },
+      products,
+    };
 
-    try {
-      const payload = {
-        maPhieuOriginal: form.maPhieuOriginal,
-        customer: {
-          tenKhach: String(form.tenKhach || "").trim(),
-          soDienThoai: String(form.soDienThoai || "").trim(),
-        },
-        orderInfo: {
-          maPhieu,
-          ngayBan: form.ngayBan || "",
-          trangThaiCode: form.trangThaiCode || "PAID",
-          soTienDaTra,
-          ghiChu: String(form.ghiChu || "-").trim() || "-",
-        },
-        products,
-      };
-      const res = await updateOrder(payload);
-      if (res?.success) {
-        toast.success(res.message || "Đã cập nhật hóa đơn", {
-          id: toastId,
-          duration: 5000,
-        });
-        try { if (!res?.queued) formatAllSheets().catch(() => {}); } catch (e) {}
-        // Fire-and-forget: sync real data in background
+    runInBackground({
+      apiCall: () => updateOrder(payload),
+      successMessage: `Đã cập nhật hóa đơn ${maPhieu}`,
+      changeDescription: `Cập nhật hóa đơn "${maPhieu}"`,
+      userName: user?.name || user?.email || "unknown",
+      onComplete: (result) => {
+        if (result?.success && !result?.queued) {
+          formatAllSheets().catch(() => {});
+        }
         loadHistory().catch(() => {});
-      } else {
-        // Rollback
-        setOrders(ordersSnapshot);
-        setEditingOrder(editingSnapshot);
-        toast.error(res?.message || "Cập nhật hóa đơn thất bại, đã khôi phục.", {
-          id: toastId,
-          duration: 5000,
-        });
-      }
-    } catch (e) {
-      // Rollback
-      setOrders(ordersSnapshot);
-      setEditingOrder(editingSnapshot);
-      toast.error("Cập nhật hóa đơn thất bại, đã khôi phục.", {
-        id: toastId,
-        duration: 5000,
-      });
-    } finally {
-      setSavingOrder(false);
-    }
+      },
+    });
   };
 
   return (
