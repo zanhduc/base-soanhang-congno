@@ -92,6 +92,7 @@ export default function GlobalNoticeBanner() {
   return (
     <div
       className={`
+        global-notice-banner
         fixed bottom-0 left-0 right-0 z-[9999]
         ${cfg.wrap}
         backdrop-blur-xl

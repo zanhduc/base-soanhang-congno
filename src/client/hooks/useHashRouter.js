@@ -8,14 +8,16 @@ const VALID_ROUTES = [
   "stock",
   "debt",
   "stats",
+  "print-diagnostic",
 ]
 
 const DEFAULT_ROUTE = "create-order"
 
 function getHashRoute() {
   const hash = window.location.hash.replace(/^#\/?/, "").trim()
-  if (!hash || !VALID_ROUTES.includes(hash)) return DEFAULT_ROUTE
-  return hash
+  const route = hash.split("?")[0]
+  if (!route || !VALID_ROUTES.includes(route)) return DEFAULT_ROUTE
+  return route
 }
 
 /**

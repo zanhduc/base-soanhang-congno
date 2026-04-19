@@ -1506,6 +1506,80 @@ const logAction = async (payload) => {
   return { success: true };
 };
 
+const issueEasyInvoice = async (payload) => {
+  await sleep(1500);
+  const orderData = payload?.orderData || {};
+  const maPhieu = orderData.maPhieu || "UNKNOWN";
+  
+  const invNo = "INV-" + maPhieu;
+  const lCode = "ABCDEF1234";
+  const stText = "Đã phát hành";
+
+  // Cập nhật vào mockOrders để khi load lại list trên localhost sẽ thấy
+  const orderIndex = MOCK_ORDER_HISTORY.findIndex(o => o.maPhieu === maPhieu);
+  if (orderIndex !== -1) {
+    MOCK_ORDER_HISTORY[orderIndex].invoiceNo = invNo;
+    MOCK_ORDER_HISTORY[orderIndex].lookupCode = lCode;
+    MOCK_ORDER_HISTORY[orderIndex].statusText = stText;
+  }
+
+  return {
+    success: true,
+    message: "Phát hành hóa đơn thành công (Mock)!",
+    invoiceNo: invNo,
+    lookupCode: lCode,
+    statusText: stText
+  };
+};
+
+const cancelEasyInvoice = async (payload) => {
+  await sleep(1500);
+  const maPhieu = String(payload?.maPhieu || "").trim();
+  
+  const orderIndex = MOCK_ORDER_HISTORY.findIndex(o => o.maPhieu === maPhieu);
+  if (orderIndex !== -1) {
+    MOCK_ORDER_HISTORY[orderIndex].statusText = "Đã hủy";
+  }
+
+  return {
+    success: true,
+    message: "Hủy hóa đơn thành công (Mock)!",
+  };
+};
+
+const replaceEasyInvoice = async (payload) => {
+  await sleep(1500);
+  const maPhieu = String(payload?.maPhieu || "").trim();
+  
+  const invNo = "INV-" + maPhieu + "-R1";
+  const lCode = "ABCDEF1234|IKEY:mock-uuid";
+  const stText = "Đã thay thế";
+
+  const orderIndex = MOCK_ORDER_HISTORY.findIndex(o => o.maPhieu === maPhieu);
+  if (orderIndex !== -1) {
+    MOCK_ORDER_HISTORY[orderIndex].invoiceNo = invNo;
+    MOCK_ORDER_HISTORY[orderIndex].lookupCode = lCode;
+    MOCK_ORDER_HISTORY[orderIndex].statusText = stText;
+  }
+
+  return {
+    success: true,
+    message: "Thay thế hóa đơn thành công (Mock)!",
+    invoiceNo: invNo,
+    lookupCode: lCode,
+    statusText: stText
+  };
+};
+
+const downloadInvoicePDF = async (payload) => {
+  await sleep(1000);
+  return {
+    success: true,
+    message: "Tải file PDF thành công (Mock)",
+    base64: "JVBERi0xLjQKJ..." // Mock PDF content
+  };
+};
+
 export const localAdapter = {
   call,
   helloServer,
@@ -1540,5 +1614,9 @@ export const localAdapter = {
   setAppSetting,
   uploadImageToImgBB,
   logAction,
+  issueEasyInvoice,
+  cancelEasyInvoice,
+  replaceEasyInvoice,
+  downloadInvoicePDF,
   formatAllSheets: async () => call("formatAllSheets"),
 };

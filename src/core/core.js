@@ -293,6 +293,7 @@ export const getStatusCode = (status) => {
     return "PARTIAL";
   if (key === "no" || key.includes(" no ")) return "DEBT";
   if (key.includes("da thanh toan")) return "PAID";
+  if (key.includes("da huy")) return "CANCELLED";
   return "PAID";
 };
 

@@ -9,10 +9,15 @@ import {
   updateOrder,
   getReceiptHistory,
   formatAllSheets,
+  issueEasyInvoice,
+  cancelEasyInvoice,
+  replaceEasyInvoice,
+  downloadInvoicePDF,
 } from "../api";
 import { runInBackground } from "../api/backgroundApi";
 import toast from "react-hot-toast";
 import { buildVietQrUrl } from "../utils/vietqr";
+import { openReceiptWithStrategy } from "../utils/printStrategy";
 import { useUser } from "../context";
 import {
   formatMoney as fmt,
@@ -30,49 +35,36 @@ import {
   moneyMeaning,
 } from "../../core/core";
 
-const openReceiptPage = (order, size) => {
+const openReceiptPage = async (order, size) => {
   const maPhieu = String(order?.maPhieu || "").trim();
   if (!maPhieu) {
     toast.error("Không tìm thấy mã phiếu để in.");
     return;
   }
-  const gasUrl = import.meta.env.VITE_GAS_WEBAPP_URL || "";
   const isPdf = size === "pdf";
-  const isDev = import.meta.env.DEV;
-
-  // Với in nhiệt (SPA route), ưu tiên dùng local URL khi đang dev để test dễ dàng.
-  // Nếu trên GAS (production/test dev), lấy dynamic parent URL từ document.referrer để luôn cùng phiên bản với trang hiện tại.
-  let baseUrl = `${window.location.origin}${window.location.pathname}`;
-  if (!isDev) {
-    if (document.referrer && document.referrer.includes("script.google.com")) {
-      baseUrl = document.referrer.split("?")[0].split("#")[0];
-    } else if (gasUrl) {
-      baseUrl = gasUrl;
-    }
-  }
-  
-  if (isPdf && !gasUrl && !isDev) {
-    toast.error("Thiếu VITE_GAS_WEBAPP_URL để mở PDF.");
-    return;
-  }
+  const preferredExecUrl = String(import.meta.env.VITE_GAS_WEBAPP_URL || "").trim();
+  const baseUrl = preferredExecUrl || `${window.location.origin}${window.location.pathname}`;
   const sizeParam =
-    size === "58"
-      ? "58"
-      : size === "80"
-        ? "80"
-        : size === "pdf"
-          ? "pdf"
-          : "";
+    size === "58" ? "58" : size === "80" ? "80" : size === "pdf" ? "pdf" : "";
 
-  let url;
   if (isPdf) {
-    url = `${baseUrl}?printPdf=${encodeURIComponent(maPhieu)}${sizeParam ? `&size=${sizeParam}` : ""}`;
+    const url = `${baseUrl}?printPdf=${encodeURIComponent(maPhieu)}${sizeParam ? `&size=${sizeParam}` : ""}`;
+    const win = window.open(url, "_blank");
+    if (!win) {
+      toast.error("Trình duyệt đang chặn cửa sổ in hóa đơn.");
+    }
   } else {
-    url = `${baseUrl}#print=${encodeURIComponent(maPhieu)}${sizeParam ? `&size=${sizeParam}` : ""}`;
-  }
-  const win = window.open(url, "_blank", "width=420,height=700");
-  if (!win) {
-    toast.error("Trình duyệt đang chặn cửa sổ in hóa đơn.");
+    await openReceiptWithStrategy(
+      {
+        code: maPhieu,
+        size: sizeParam || "58",
+        autoPrint: true,
+        autoBack: true,
+      },
+      {
+        onInfo: (msg) => toast(msg, { icon: "🖨️" }),
+      },
+    );
   }
 };
 
@@ -153,6 +145,7 @@ function StatusBadge({ status }) {
   if (key === "PAID") cls = "bg-emerald-100 text-emerald-700";
   if (key === "PARTIAL") cls = "bg-violet-100 text-violet-700";
   if (key === "DEBT") cls = "bg-amber-100 text-amber-800";
+  if (key === "CANCELLED") cls = "bg-slate-200 text-slate-600 border border-slate-300";
   return (
     <span
       className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${cls}`}
@@ -162,22 +155,39 @@ function StatusBadge({ status }) {
   );
 }
 
-function HistoryCard({ order, deleting, onEdit, onDelete, bankConfig }) {
+function HistoryCard({
+  order,
+  deleting,
+  issuing,
+  canceling,
+  onEdit,
+  onDelete,
+  onIssueInvoice,
+  onCancelInvoice,
+  onReplaceInvoice,
+  replacing,
+  bankConfig,
+}) {
   const [open, setOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const isPartial = getStatusCode(order.trangThai) === "PARTIAL";
+  const isCancelled = order.statusText === "Đã hủy" || getStatusCode(order.trangThai) === "CANCELLED";
 
   useEffect(() => {
     const onEsc = (e) => {
       if (e.key === "Escape") {
         setPrintOpen(false);
         setQrOpen(false);
+        setInvoiceModalOpen(false);
       }
     };
-    if (printOpen || qrOpen) document.addEventListener("keydown", onEsc);
+    if (printOpen || qrOpen || invoiceModalOpen)
+      document.addEventListener("keydown", onEsc);
     return () => document.removeEventListener("keydown", onEsc);
-  }, [printOpen, qrOpen]);
+  }, [printOpen, qrOpen, invoiceModalOpen]);
 
   const qrAmount = isPartial
     ? Math.max(toNum(order.tienNo), 0)
@@ -213,11 +223,11 @@ function HistoryCard({ order, deleting, onEdit, onDelete, bankConfig }) {
   };
 
   return (
-    <article className="rounded-2xl border border-rose-200 bg-white p-4 md:p-5 shadow-sm">
+    <article className={`rounded-2xl border ${isCancelled ? "border-slate-200 bg-slate-50/50 opacity-80 shadow-none" : "border-rose-200 bg-white shadow-sm"} p-4 md:p-5 transition-all`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs text-slate-500">Mã phiếu</p>
-          <h3 className="text-lg font-bold text-slate-900">{order.maPhieu}</h3>
+          <h3 className={`text-lg font-bold ${isCancelled ? "text-slate-500 line-through" : "text-slate-900"}`}>{order.maPhieu}</h3>
           <p className="text-sm text-slate-500 mt-1">
             Ngày bán: {order.ngayBan || "-"}
           </p>
@@ -233,7 +243,7 @@ function HistoryCard({ order, deleting, onEdit, onDelete, bankConfig }) {
             </p>
           )}
           <p className="text-xs text-slate-500 mt-2">Tổng hóa đơn</p>
-          <p className="text-lg font-bold text-rose-700">
+          <p className={`text-lg font-bold ${isCancelled ? "text-slate-400 line-through" : "text-rose-700"}`}>
             {fmt(order.tongHoaDon)}
           </p>
         </div>
@@ -343,14 +353,207 @@ function HistoryCard({ order, deleting, onEdit, onDelete, bankConfig }) {
             >
               Sửa
             </button>
+            {order.invoiceNo ? (
+              <button
+                type="button"
+                onClick={() => setInvoiceModalOpen(true)}
+                className="shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 flex items-center gap-1.5"
+                title={`HĐ Đỏ Số: ${order.invoiceNo} - Trạng thái: ${order.statusText || "Đang xử lý"}`}
+              >
+                HĐĐT
+                <span
+                  className={`w-2 h-2 rounded-full ${order.statusText === "Đã hủy" || isCancelled ? "bg-rose-500" : "bg-emerald-500"}`}
+                ></span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setInvoiceModalOpen(true)}
+                disabled={issuing || isCancelled}
+                className="shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Hóa đơn ĐT
+              </button>
+            )}
             <button
               type="button"
               onClick={onDelete}
-              disabled={deleting}
-              className="shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+              disabled={deleting || isCancelled}
+              className="shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
             >
               {deleting ? "Đang xóa..." : "Xóa"}
             </button>
+          </div>
+        </div>
+      )}
+      {invoiceModalOpen && (
+        <div
+          className="fixed inset-0 z-[9900] bg-slate-900/40 p-4"
+          onClick={() => setInvoiceModalOpen(false)}
+        >
+          <div
+            className="mx-auto mt-[18vh] w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-slate-900 mb-1">
+              Hóa Đơn Điện Tử (HSM)
+            </h3>
+            <p className="text-sm text-slate-500 mb-4">
+              Mã phiếu: {order.maPhieu}
+            </p>
+
+            {order.invoiceNo ? (
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4">
+                <p className="text-sm font-semibold text-slate-700">
+                  Thông tin HĐĐT
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Số hóa đơn:{" "}
+                  <span className="font-bold text-slate-800">
+                    {order.invoiceNo}
+                  </span>
+                </p>
+                <p className="text-xs text-slate-500">
+                  Mã tra cứu: {String(order.lookupCode || "").split("|IKEY:")[0]}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Trạng thái:{" "}
+                  <span
+                    className={`font-bold ${order.statusText === "Đã hủy" ? "text-rose-600" : "text-emerald-600"}`}
+                  >
+                    {order.statusText || "Đang xử lý"}
+                  </span>
+                </p>
+                {order.taxAuthorityCode && (
+                  <p className="text-xs text-slate-500 mt-1 pb-1 border-t border-slate-100 pt-1">
+                    Mã CQT:{" "}
+                    <span className="font-medium text-slate-800 break-all">
+                      {order.taxAuthorityCode}
+                    </span>
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className={`bg-amber-50 p-3 rounded-xl border ${isCancelled ? "border-rose-200 bg-rose-50/50" : "border-amber-200"} mb-4`}>
+                <p className={`text-sm font-medium ${isCancelled ? "text-rose-700" : "text-amber-700"}`}>
+                  {isCancelled ? "Hóa đơn này đã bị Hủy. Bạn có thể Sửa đơn hàng và Phát hành hóa đơn mới bên dưới." : "Đơn hàng này chưa được xuất Hóa đơn điện tử."}
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-2 mt-2">
+              {(!order.invoiceNo || isCancelled) && (
+                <button
+                  onClick={() => {
+                    onIssueInvoice();
+                    setInvoiceModalOpen(false);
+                  }}
+                  disabled={issuing}
+                  className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {issuing ? "Đang xuất..." : isCancelled ? "Phát hành lại HĐĐT mới" : "Tiến hành xuất HĐĐT"}
+                </button>
+              )}
+              {order.invoiceNo && order.statusText !== "Đã hủy" && (
+                <button
+                  onClick={() => {
+                    const ok = window.confirm(
+                      "Bạn có chắc chắn muốn Hủy hóa đơn này và báo cáo lên Thuế?\nHành động này không thể hoàn tác!",
+                    );
+                    if (ok) {
+                      onCancelInvoice();
+                      setInvoiceModalOpen(false);
+                    }
+                  }}
+                  disabled={canceling}
+                  className="w-full rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                >
+                  {canceling
+                    ? "Đang xử lý hủy..."
+                    : "Hủy Hóa Đơn (Báo Cáo Thuế)"}
+                </button>
+              )}
+              {order.invoiceNo && !isCancelled && (
+                <button
+                  onClick={() => {
+                    const ok = window.confirm(
+                      "Bạn sẽ xuất 1 hóa đơn mới với số mới (Hóa đơn thay thế) và báo cáo thuế, Hóa đơn cũ này sẽ bị thay thế. Bạn có chắc chắn?",
+                    );
+                    if (ok) {
+                      onReplaceInvoice();
+                      setInvoiceModalOpen(false);
+                    }
+                  }}
+                  disabled={replacing}
+                  className="w-full rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+                >
+                  {replacing
+                    ? "Đang cập nhật..."
+                    : "Lưu Cập Nhật (Thay Thế HĐĐT)"}
+                </button>
+              )}
+              {order.invoiceNo && (
+                <button
+                  disabled={downloading}
+                  onClick={async () => {
+                    setDownloading(true);
+                    try {
+                      const res = await downloadInvoicePDF({
+                        maPhieu: order.maPhieu,
+                      });
+                      if (res?.success && res.base64) {
+                        const byteCharacters = atob(res.base64);
+                        const byteNumbers = new Array(byteCharacters.length);
+                        for (let i = 0; i < byteCharacters.length; i++) {
+                          byteNumbers[i] = byteCharacters.charCodeAt(i);
+                        }
+                        const byteArray = new Uint8Array(byteNumbers);
+                        const blob = new Blob([byteArray], {
+                          type: "application/pdf",
+                        });
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = res.filename || `HoaDon_${order.maPhieu}.pdf`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                        toast.success("Đang tải hóa đơn...");
+                      } else {
+                        toast.error(res?.message || "Không thể tải file PDF");
+                      }
+                    } catch (err) {
+                      toast.error("Lỗi khi tải file: " + err.message);
+                    } finally {
+                      setDownloading(false);
+                    }
+                  }}
+                  className="w-full mb-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 flex items-center justify-center gap-2"
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 15V3m0 12l-4-4m4 4l4-4M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1"
+                    ></path>
+                  </svg>
+                  {downloading ? "Đang tải..." : "Tải hóa đơn (PDF)"}
+                </button>
+              )}
+              <button
+                onClick={() => setInvoiceModalOpen(false)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Đóng cửa sổ
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -727,7 +930,8 @@ function EditOrderModal({
               </button>
             ))}
           </div>
-          {(form.trangThaiCode === "PARTIAL" || form.trangThaiCode === "DEBT") && (
+          {(form.trangThaiCode === "PARTIAL" ||
+            form.trangThaiCode === "DEBT") && (
             <div className="space-y-1">
               <MoneyInput
                 value={form.soTienDaTra}
@@ -1313,6 +1517,9 @@ export default function HistoryPage() {
   const [editingOrder, setEditingOrder] = useState(null);
   const [savingOrder, setSavingOrder] = useState(false);
   const [deletingCode, setDeletingCode] = useState("");
+  const [issuingCode, setIssuingCode] = useState("");
+  const [cancelingCode, setCancelingCode] = useState("");
+  const [replacingCode, setReplacingCode] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [filters, setFilters] = useState({
     fromDate: "",
@@ -1435,8 +1642,8 @@ export default function HistoryPage() {
   const dateSearchMeta = useMemo(() => getDateSearchMeta(query), [query]);
 
   const loadHistory = () => {
-    if (activeTab === "orders") loadOrderHistory();
-    else loadReceiptHistory();
+    if (activeTab === "orders") return loadOrderHistory();
+    return loadReceiptHistory();
   };
 
   const filteredOrders = useMemo(() => {
@@ -1703,6 +1910,64 @@ export default function HistoryPage() {
     });
   };
 
+  const handleIssueInvoice = (maPhieu) => {
+    const key = String(maPhieu || "").trim();
+    if (!key) return;
+    setIssuingCode(key);
+
+    runInBackground({
+      apiCall: () => issueEasyInvoice({ maPhieu: key }),
+      successMessage: `Đã phát hành HĐĐT cho đơn ${key}`,
+      changeDescription: `Phát hành HĐĐT đơn "${key}"`,
+      userName: user?.name || user?.email || "unknown",
+      onComplete: (result) => {
+        setIssuingCode("");
+        if (result?.success && !result?.queued) {
+          // Có thể load lại list ngay để hiển thị số hóa đơn Mới
+          loadHistory().catch(() => {});
+        }
+      },
+    });
+  };
+
+  const handleCancelInvoice = (maPhieu) => {
+    const key = String(maPhieu || "").trim();
+    if (!key) return;
+    setCancelingCode(key);
+
+    runInBackground({
+      apiCall: () => cancelEasyInvoice({ maPhieu: key }),
+      successMessage: `Đã xử lý tiến trình hủy hóa đơn ${key}`,
+      changeDescription: `Hủy HĐĐT đơn "${key}"`,
+      userName: user?.name || user?.email || "unknown",
+      onComplete: (result) => {
+        setCancelingCode("");
+        if (result?.success && !result?.queued) {
+          loadHistory().catch(() => {});
+        }
+      },
+    });
+  };
+
+  const handleReplaceInvoice = (maPhieu) => {
+    const key = String(maPhieu || "").trim();
+    if (!key) return;
+    setReplacingCode(key);
+
+    runInBackground({
+      apiCall: () => replaceEasyInvoice({ maPhieu: key }),
+      successMessage: `Đã thay thế HĐĐT cho đơn ${key}`,
+      changeDescription: `Thay thế HĐĐT đơn "${key}"`,
+      userName: user?.name || user?.email || "unknown",
+      onComplete: (result) => {
+        setReplacingCode("");
+        if (result?.success && !result?.queued) {
+          loadHistory().catch(() => {});
+        }
+      },
+    });
+  };
+
   const handleSaveOrder = (form, total) => {
     const maPhieu = String(form.maPhieu || "").trim();
     if (!maPhieu) return toast.error("Mã phiếu không được để trống");
@@ -1760,7 +2025,8 @@ export default function HistoryPage() {
     // Optimistic UI: update list + close modal immediately
     setOrders((prev) =>
       prev.map((o) =>
-        String(o.maPhieu || "").trim() === String(form.maPhieuOriginal || "").trim()
+        String(o.maPhieu || "").trim() ===
+        String(form.maPhieuOriginal || "").trim()
           ? { ...o, ...optimisticOrder }
           : o,
       ),
@@ -2015,8 +2281,14 @@ export default function HistoryPage() {
                   key={`${item.maPhieu}-${idx}`}
                   order={item}
                   deleting={deletingCode === item.maPhieu}
+                  issuing={issuingCode === item.maPhieu}
+                  canceling={cancelingCode === item.maPhieu}
+                  replacing={replacingCode === item.maPhieu}
                   onEdit={() => setEditingOrder(enrichOrderForEdit(item))}
                   onDelete={() => handleDeleteOrder(item.maPhieu)}
+                  onIssueInvoice={() => handleIssueInvoice(item.maPhieu)}
+                  onCancelInvoice={() => handleCancelInvoice(item.maPhieu)}
+                  onReplaceInvoice={() => handleReplaceInvoice(item.maPhieu)}
                   bankConfig={bankConfig}
                 />
               ) : (

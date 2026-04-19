@@ -178,4 +178,3 @@ React + Business Logic mới là sản phẩm thật sự.
   - Đồng bộ đa nguồn dữ liệu
   - Tính toán tổng tiền, công nợ, trạng thái
 - Mỗi thay đổi lớn phải có checklist test nhanh trước khi merge/deploy.
-

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createOrder,
   getCustomerCatalog,
@@ -9,9 +9,11 @@ import {
 } from "../api";
 import { runInBackground } from "../api/backgroundApi";
 import toast from "react-hot-toast";
-import { buildVietQrUrl } from "../utils/vietqr";
+import { openReceiptWithStrategy } from "../utils/printStrategy";
 import ImageUploader from "../components/ImageUploader";
 import { useUser } from "../context";
+import { buildVietQrUrl } from "../utils/vietqr";
+import PosCreateOrderLayout from "./pos/PosCreateOrderLayout";
 import {
   formatMoney as fmt,
   normalizeText as foldText,
@@ -23,6 +25,8 @@ const DEFAULT_ORDER_CODE = "01";
 const ORDER_DEFAULTS_CACHE_KEY = "soanhang.orderDefaults";
 const BANK_CONFIG_CACHE_KEY = "soanhang.bankConfig";
 const BANK_CONFIG_CACHE_TTL_MS = 30 * 60 * 1000;
+const ORDER_DRAFT_KEY = "soanhang.createOrderDraft.v1";
+const ORDER_DRAFT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 
 const readCachedOrderDefaults = () => {
   try {
@@ -94,6 +98,75 @@ const writeCachedBankConfig = (config) => {
   }
 };
 
+const readOrderDraft = () => {
+  try {
+    const raw = localStorage.getItem(ORDER_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const updatedAt = Number(parsed?.updatedAt || 0);
+    if (!updatedAt || Date.now() - updatedAt > ORDER_DRAFT_MAX_AGE_MS) {
+      localStorage.removeItem(ORDER_DRAFT_KEY);
+      return null;
+    }
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+};
+
+const writeOrderDraft = (payload) => {
+  try {
+    const updatedAt = Date.now();
+    localStorage.setItem(
+      ORDER_DRAFT_KEY,
+      JSON.stringify({
+        version: 1,
+        updatedAt,
+        payload,
+      }),
+    );
+    return updatedAt;
+  } catch (e) {
+    return 0;
+  }
+};
+
+const clearOrderDraft = () => {
+  try {
+    localStorage.removeItem(ORDER_DRAFT_KEY);
+  } catch (e) {
+    // noop
+  }
+};
+
+const isMeaningfulDraftPayload = (payload) => {
+  if (!payload) return false;
+  if (Array.isArray(payload.products) && payload.products.length > 0) return true;
+  if (String(payload?.customerInfo?.tenKhach || "").trim()) return true;
+  if (String(payload?.newProduct?.tenSanPham || "").trim()) return true;
+  if (String(payload?.orderInfo?.ghiChu || "").trim()) return true;
+  return false;
+};
+
+const normalizeDraftProducts = (items) => {
+  if (!Array.isArray(items)) return [];
+  return items
+    .slice(0, 300)
+    .map((p) => ({
+      id: String(p?.id || Date.now() + Math.random()),
+      tenSanPham: String(p?.tenSanPham || "").trim(),
+      anhSanPham: String(p?.anhSanPham || "").trim(),
+      nhomHang: String(p?.nhomHang || "").trim(),
+      donVi: String(p?.donVi || "").trim(),
+      soLuong: Math.max(1, Number(p?.soLuong || 1)),
+      donGiaBan: Math.max(0, Number(p?.donGiaBan || 0)),
+      giaVon: Math.max(0, Number(p?.giaVon || 0)),
+      tonKhoMax:
+        p?.tonKhoMax === undefined ? undefined : Number(p.tonKhoMax || 0),
+    }))
+    .filter((p) => p.tenSanPham);
+};
+
 const createInitialOrderInfo = () => ({
   maPhieu: "",
   ngayBan: getTodayInputDate(),
@@ -102,6 +175,7 @@ const createInitialOrderInfo = () => ({
   soTienDaTra: 0,
   ghiChu: "",
 });
+
 
 function CurrencyInput({ value, onChange, className }) {
   const [display, setDisplay] = useState(value ? fmt(value) : "");
@@ -115,15 +189,13 @@ function CurrencyInput({ value, onChange, className }) {
     const cursorPos = el.selectionStart;
     const oldLen = el.value.length;
 
-    // Chỉ giữ số
     const digits = e.target.value.replace(/[^0-9]/g, "");
-    const num = parseInt(digits) || 0;
+    const num = parseInt(digits, 10) || 0;
 
     onChange(num);
     const formatted = num > 0 ? fmt(num) : digits;
     setDisplay(formatted);
 
-    // Fix cursor position sau khi format
     requestAnimationFrame(() => {
       const newLen = formatted.length;
       const diff = newLen - oldLen;
@@ -184,7 +256,7 @@ function CustomerInfoSection({
             placeholder="Nhập hoặc chọn khách hàng"
             value={customerInfo.tenKhach}
             maxLength={120}
-            onFocus={() => setShowCustomerSuggestions(true)}
+            onFocus={onShowSuggestions}
             onBlur={() => setTimeout(onHideSuggestions, 120)}
             onChange={(e) => {
               onUpdate({ ...customerInfo, tenKhach: e.target.value });
@@ -299,7 +371,7 @@ function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
           value={orderInfo.ghiChu}
           maxLength={200}
           onChange={(e) => onUpdate({ ...orderInfo, ghiChu: e.target.value })}
-          className={`${inputCls} resize-none`}
+          className={`${inputCls(false)} resize-none`}
           rows={2}
         />
       </div>
@@ -307,7 +379,13 @@ function OrderInfoSection({ orderInfo, onUpdate, isLoadingDefaults }) {
   );
 }
 
-function ProductListItem({ product, onUpdate, onRemove, showImages = false }) {
+
+function ProductListItem({
+  product,
+  onUpdate,
+  onRemove,
+  showImages = false,
+}) {
   const thanhTien = product.soLuong * product.donGiaBan;
   const subText = product.nhomHang
     ? `${product.nhomHang} • ${product.donVi || "Không xác định"}`
@@ -366,14 +444,14 @@ function ProductListItem({ product, onUpdate, onRemove, showImages = false }) {
               value={product.soLuong}
               onChange={(e) => {
                 const val =
-                  e.target.value === "" ? "" : parseInt(e.target.value) || 0;
+                  e.target.value === "" ? "" : parseInt(e.target.value, 10) || 0;
                 const maxVal =
                   product.tonKhoMax !== undefined ? product.tonKhoMax : 100000;
                 onUpdate({
                   soLuong: val === "" ? "" : Math.min(val, maxVal),
                 });
               }}
-              onBlur={(e) => {
+              onBlur={() => {
                 if (product.soLuong === "" || product.soLuong < 1)
                   onUpdate({ soLuong: 1 });
               }}
@@ -395,7 +473,6 @@ function ProductListItem({ product, onUpdate, onRemove, showImages = false }) {
           </label>
           <CurrencyInput
             value={product.donGiaBan}
-            maxLength={20}
             onChange={(v) => onUpdate({ donGiaBan: v })}
             className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
           />
@@ -406,7 +483,6 @@ function ProductListItem({ product, onUpdate, onRemove, showImages = false }) {
           </label>
           <CurrencyInput
             value={product.giaVon || 0}
-            maxLength={20}
             onChange={(v) => {
               if (v > 0 && product.donGiaBan > 0 && v > product.donGiaBan) {
                 onUpdate({ giaVon: product.donGiaBan });
@@ -455,10 +531,242 @@ function OrderSummary({ totalAmount, totalItems }) {
   );
 }
 
+
+function PaymentConfirmModal({
+  visible,
+  pendingOrder,
+  closePaymentModal,
+  paymentStatus,
+  setPaymentStatus,
+  partialAmount,
+  setPartialAmount,
+  isPartialOverpay,
+  paymentMethod,
+  setPaymentMethod,
+  partialReady,
+  ensureBankConfig,
+  isLoadingBankConfig,
+  bankError,
+  bankConfig,
+  handlePrintPreview,
+  handleConfirmPayment,
+  isSubmitting,
+}) {
+  if (!visible || !pendingOrder) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[9900] bg-slate-900/40 p-4"
+      onClick={closePaymentModal}
+    >
+      <div
+        className="mx-auto mt-[10vh] w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">
+              Xác nhận thanh toán đơn hàng
+            </h3>
+            <p className="text-sm text-slate-500 mt-1">
+              Mã phiếu: {pendingOrder?.orderData?.orderInfo?.maPhieu || "-"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={closePaymentModal}
+            className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100"
+          >
+            Đóng
+          </button>
+        </div>
+
+        <div className="mt-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+            Trạng thái thanh toán
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { code: "PAID", label: "Thanh toán tất" },
+              { code: "PARTIAL", label: "Trả 1 phần" },
+              { code: "DEBT", label: "Nợ" },
+            ].map((st) => (
+              <button
+                key={st.code}
+                type="button"
+                onClick={() => {
+                  setPaymentStatus(st.code);
+                  if (st.code === "DEBT") {
+                    setPaymentMethod("");
+                  }
+                }}
+                className={`py-2 px-1 text-[11px] font-semibold rounded-xl transition-all border ${
+                  paymentStatus === st.code
+                    ? "bg-rose-700 border-rose-700 text-white shadow-md shadow-rose-700/20"
+                    : "bg-white border-slate-200 text-slate-600 hover:border-rose-300 hover:bg-rose-50"
+                }`}
+              >
+                {st.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {paymentStatus === "PARTIAL" && (
+          <div className="mt-4">
+            <label className="block text-sm font-semibold text-slate-800 mb-2">
+              Số tiền đã trả trước
+            </label>
+            <CurrencyInput
+              value={partialAmount || 0}
+              onChange={(v) => setPartialAmount(v)}
+              className={`w-full rounded-xl border bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all ${
+                isPartialOverpay
+                  ? "border-rose-400 focus:border-rose-500 focus:ring-rose-500/20"
+                  : "border-slate-200 focus:border-rose-700 focus:ring-rose-700/20"
+              }`}
+            />
+            <p
+              className={`mt-1 text-xs ${
+                isPartialOverpay ? "text-rose-600" : "text-slate-500"
+              }`}
+            >
+              {isPartialOverpay
+                ? "Số tiền đã trả không được lớn hơn tổng đơn."
+                : "Không được lớn hơn tổng đơn."}
+            </p>
+          </div>
+        )}
+
+        {paymentStatus !== "DEBT" && (
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setPaymentMethod("cash")}
+              disabled={!partialReady}
+              className={`rounded-xl border px-4 py-2.5 text-sm font-semibold ${
+                paymentMethod === "cash"
+                  ? "border-slate-400 bg-slate-50 text-slate-700"
+                  : "border-slate-200 text-slate-700 hover:bg-slate-50"
+              } ${!partialReady ? "opacity-50 cursor-not-allowed" : ""}`}
+            >
+              Tiền mặt
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPaymentMethod("bank");
+                ensureBankConfig();
+              }}
+              disabled={!partialReady}
+              className={`rounded-xl border px-4 py-2.5 text-sm font-semibold ${
+                paymentMethod === "bank"
+                  ? "border-rose-200 bg-rose-50 text-rose-700"
+                  : "border-rose-200 text-rose-700 hover:bg-rose-50"
+              } ${!partialReady ? "opacity-50 cursor-not-allowed" : ""}`}
+            >
+              Chuyển khoản
+            </button>
+          </div>
+        )}
+        {!partialReady && paymentStatus === "PARTIAL" && (
+          <p className="mt-2 text-xs text-slate-500">
+            Nhập số tiền đã trả trước để chọn phương thức thanh toán.
+          </p>
+        )}
+
+        {paymentStatus !== "DEBT" && paymentMethod === "bank" && (
+          <div className="mt-4 rounded-xl border border-rose-200/60 bg-rose-50/40">
+            {isLoadingBankConfig && (
+              <p className="text-sm text-slate-500">
+                Đang tải thông tin ngân hàng...
+              </p>
+            )}
+            {!isLoadingBankConfig && bankError && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {bankError}
+              </div>
+            )}
+            {!isLoadingBankConfig && !bankError && bankConfig && (
+              <div className="space-y-3">
+                <div className="p-1 flex items-center justify-center">
+                  {(() => {
+                    const qrUrl = buildVietQrUrl({
+                      bankCode: bankConfig.bankCode,
+                      accountNumber: bankConfig.accountNumber,
+                      accountName: bankConfig.accountName,
+                      amount:
+                        paymentStatus === "PARTIAL"
+                          ? Number(partialAmount || 0)
+                          : Number(pendingOrder.totalAmount || 0),
+                      addInfo: (() => {
+                        const maPhieu =
+                          pendingOrder?.orderData?.orderInfo?.maPhieu || "";
+                        if (paymentStatus !== "PARTIAL") return maPhieu;
+                        const total = Number(pendingOrder.totalAmount || 0);
+                        const paid = Number(partialAmount || 0);
+                        const remain = Math.max(total - paid, 0);
+                        const remainText = remain.toLocaleString("vi-VN");
+                        return `${maPhieu} còn thiếu ${remainText}đ`;
+                      })(),
+                    });
+                    if (!qrUrl) return null;
+                    return (
+                      <img
+                        src={qrUrl}
+                        alt="VietQR"
+                        className="h-64 w-64 rounded-2xl border border-rose-200 bg-white object-contain p-3 shadow-sm"
+                      />
+                    );
+                  })()}
+                </div>
+                <p className="text-center text-xs text-slate-500">
+                  Quét mã để chuyển khoản
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={closePaymentModal}
+            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            Hủy
+          </button>
+          <button
+            type="button"
+            onClick={handlePrintPreview}
+            className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 transition-all"
+          >
+            In hóa đơn
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirmPayment}
+            disabled={isSubmitting}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold text-white transition-all ${
+              isSubmitting
+                ? "bg-slate-400 cursor-not-allowed"
+                : "bg-gradient-to-r from-rose-700 to-rose-500 hover:shadow-lg hover:shadow-rose-700/25"
+            }`}
+          >
+            {paymentStatus === "DEBT" ? "Xác nhận nợ" : "Xác nhận thanh toán"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 /*  Main Page  */
 
-export default function CreateOrderPage() {
+export default function CreateOrderPage({ appMode = "web" }) {
   const { user } = useUser();
+  const isPosMode = appMode === "pos";
   const [isCustomerMode, setIsCustomerMode] = useState(false);
   const [customerInfo, setCustomerInfo] = useState({
     tenKhach: "",
@@ -506,6 +814,13 @@ export default function CreateOrderPage() {
     giaVon: 0,
   });
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [hasDraft, setHasDraft] = useState(() => !!readOrderDraft());
+  const [draftUpdatedAt, setDraftUpdatedAt] = useState(
+    () => Number(readOrderDraft()?.updatedAt || 0),
+  );
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [posKeyBuffer, setPosKeyBuffer] = useState("1");
+  const didOfferRestoreRef = useRef(false);
   const loadOrderDefaults = async ({ silent = false } = {}) => {
     const today = getTodayInputDate();
     if (!silent) setIsLoadingOrderDefaults(true);
@@ -598,6 +913,147 @@ export default function CreateOrderPage() {
     setShowPaymentModal(false);
     setPaymentMethod("");
     setPendingOrder(null);
+  };
+
+  const resetCreateOrderForm = ({ clearDraft = false } = {}) => {
+    setProducts([]);
+    setCustomerInfo({ tenKhach: "", soDienThoai: "" });
+    setOrderInfo((prev) => ({
+      ...prev,
+      ghiChu: "",
+    }));
+    setIsCustomerMode(false);
+    setNewProduct({
+      id: "",
+      tenSanPham: "",
+      anhSanPham: "",
+      nhomHang: "",
+      donVi: "",
+      soLuong: 1,
+      donGiaBan: 0,
+      giaVon: 0,
+    });
+    if (clearDraft) {
+      clearOrderDraft();
+      setHasDraft(false);
+      setDraftUpdatedAt(0);
+    }
+  };
+
+  const buildDraftPayload = () => ({
+    isCustomerMode,
+    customerInfo: {
+      tenKhach: String(customerInfo?.tenKhach || "").trim(),
+      soDienThoai: String(customerInfo?.soDienThoai || "").trim(),
+    },
+    orderInfo: {
+      ghiChu: String(orderInfo?.ghiChu || "").trim(),
+    },
+    products: products.map((p) => ({
+      id: p.id,
+      tenSanPham: p.tenSanPham,
+      anhSanPham: p.anhSanPham,
+      nhomHang: p.nhomHang,
+      donVi: p.donVi,
+      soLuong: Number(p.soLuong || 0),
+      donGiaBan: Number(p.donGiaBan || 0),
+      giaVon: Number(p.giaVon || 0),
+      tonKhoMax: p.tonKhoMax,
+    })),
+    newProduct: {
+      tenSanPham: newProduct.tenSanPham,
+      anhSanPham: newProduct.anhSanPham,
+      nhomHang: newProduct.nhomHang,
+      donVi: newProduct.donVi,
+      soLuong: Number(newProduct.soLuong || 1),
+      donGiaBan: Number(newProduct.donGiaBan || 0),
+      giaVon: Number(newProduct.giaVon || 0),
+    },
+  });
+
+  const saveDraftNow = ({ silent = false } = {}) => {
+    const payload = buildDraftPayload();
+    if (!isMeaningfulDraftPayload(payload)) {
+      clearOrderDraft();
+      setHasDraft(false);
+      setDraftUpdatedAt(0);
+      if (!silent) toast("Không có dữ liệu để lưu nháp.", { icon: "ℹ️" });
+      return false;
+    }
+    const updatedAt = writeOrderDraft(payload);
+    if (!updatedAt) {
+      if (!silent) toast.error("Không lưu được nháp trên thiết bị.");
+      return false;
+    }
+    setHasDraft(true);
+    setDraftUpdatedAt(updatedAt);
+    if (!silent) toast.success("Đã lưu nháp đơn hàng.");
+    return true;
+  };
+
+  const restoreDraftNow = ({ silent = false } = {}) => {
+    const draft = readOrderDraft();
+    if (!draft?.payload) {
+      setHasDraft(false);
+      setDraftUpdatedAt(0);
+      if (!silent) toast("Không tìm thấy bản nháp.", { icon: "ℹ️" });
+      return false;
+    }
+
+    const payload = draft.payload;
+    setIsCustomerMode(!!payload.isCustomerMode);
+    setCustomerInfo({
+      tenKhach: String(payload?.customerInfo?.tenKhach || ""),
+      soDienThoai: String(payload?.customerInfo?.soDienThoai || ""),
+    });
+    setOrderInfo((prev) => ({
+      ...prev,
+      ghiChu: String(payload?.orderInfo?.ghiChu || ""),
+    }));
+    setProducts(normalizeDraftProducts(payload?.products));
+    setNewProduct((prev) => ({
+      ...prev,
+      tenSanPham: String(payload?.newProduct?.tenSanPham || ""),
+      anhSanPham: String(payload?.newProduct?.anhSanPham || ""),
+      nhomHang: String(payload?.newProduct?.nhomHang || ""),
+      donVi: String(payload?.newProduct?.donVi || ""),
+      soLuong: Math.max(1, Number(payload?.newProduct?.soLuong || 1)),
+      donGiaBan: Math.max(0, Number(payload?.newProduct?.donGiaBan || 0)),
+      giaVon: Math.max(0, Number(payload?.newProduct?.giaVon || 0)),
+    }));
+    setHasDraft(true);
+    setDraftUpdatedAt(Number(draft.updatedAt || 0));
+    if (!silent) toast.success("Đã khôi phục bản nháp.");
+    return true;
+  };
+
+  const clearDraftNow = ({ silent = false } = {}) => {
+    clearOrderDraft();
+    setHasDraft(false);
+    setDraftUpdatedAt(0);
+    if (!silent) toast.success("Đã xóa bản nháp.");
+  };
+
+  const duplicateLastProduct = () => {
+    if (!products.length) {
+      toast("Chưa có sản phẩm để nhân bản.", { icon: "ℹ️" });
+      return;
+    }
+    const last = products[products.length - 1];
+    setProducts((prev) => [
+      ...prev,
+      {
+        ...last,
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        soLuong: 1,
+      },
+    ]);
+    toast.success("Đã nhân bản sản phẩm cuối.");
+  };
+
+  const dismissKeyboard = () => {
+    const el = document.activeElement;
+    if (el && typeof el.blur === "function") el.blur();
   };
 
   const getCatalogMatch = (name) => {
@@ -694,6 +1150,45 @@ export default function CreateOrderPage() {
       window.removeEventListener("storage", handleImageChange);
     };
   }, []);
+
+  useEffect(() => {
+    if (didOfferRestoreRef.current) return;
+    didOfferRestoreRef.current = true;
+    const draft = readOrderDraft();
+    if (!draft?.payload) return;
+    setHasDraft(true);
+    setDraftUpdatedAt(Number(draft.updatedAt || 0));
+    if (!isPosMode) return;
+    const draftProducts = Array.isArray(draft.payload.products)
+      ? draft.payload.products.length
+      : 0;
+    if (!draftProducts) return;
+    const ok = window.confirm(
+      "Phát hiện bản nháp đơn hàng trước đó. Bạn có muốn khôi phục không?",
+    );
+    if (ok) {
+      restoreDraftNow({ silent: true });
+      toast.success("Đã khôi phục bản nháp trước đó.");
+    }
+  }, [isPosMode]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const payload = buildDraftPayload();
+      if (!isMeaningfulDraftPayload(payload)) {
+        clearOrderDraft();
+        setHasDraft(false);
+        setDraftUpdatedAt(0);
+        return;
+      }
+      const updatedAt = writeOrderDraft(payload);
+      if (updatedAt) {
+        setHasDraft(true);
+        setDraftUpdatedAt(updatedAt);
+      }
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [isCustomerMode, customerInfo, orderInfo.ghiChu, products, newProduct]);
 
   const handleAddProduct = () => {
     const normalizedProduct = {
@@ -811,6 +1306,96 @@ export default function CreateOrderPage() {
     setProducts(products.map((p) => (p.id === id ? { ...p, ...updated } : p)));
   };
 
+  useEffect(() => {
+    if (!products.length) {
+      if (selectedProductId) setSelectedProductId("");
+      return;
+    }
+    const exists = products.some((p) => p.id === selectedProductId);
+    if (!exists) {
+      setSelectedProductId(products[products.length - 1].id);
+    }
+  }, [products, selectedProductId]);
+
+  const handleAddProductFromSuggestion = (item) => {
+    if (!item) return;
+    const tenSanPham = toTitleCase(String(item.tenSanPham || "").trim());
+    const donVi = toTitleCase(String(item.displayUnit || item.donVi || "").trim());
+    if (!tenSanPham || !donVi) {
+      toast.error("Sản phẩm chưa đủ dữ liệu để thêm nhanh.");
+      return;
+    }
+
+    const existing = products.find(
+      (p) =>
+        foldText(p.tenSanPham) === foldText(tenSanPham) &&
+        foldText(p.donVi) === foldText(donVi),
+    );
+
+    if (existing) {
+      const nextQty = Math.min(100000, Number(existing.soLuong || 0) + 1);
+      handleUpdateProduct(existing.id, { soLuong: nextQty });
+      setSelectedProductId(existing.id);
+      setShowProductSuggestions(false);
+      return;
+    }
+
+    const baseItem = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      tenSanPham,
+      anhSanPham: String(item.anhSanPham || ""),
+      nhomHang: String(item.nhomHang || ""),
+      donVi,
+      soLuong: 1,
+      donGiaBan: Math.max(0, Number(item.displayPrice ?? item.donGiaBan ?? 0)),
+      giaVon: Math.max(0, Number(item.displayCost ?? item.giaVon ?? 0)),
+      tonKhoMax:
+        item.tonKho === undefined || item.tonKho === null
+          ? undefined
+          : Number(item.tonKho),
+    };
+
+    setProducts((prev) => [...prev, baseItem]);
+    setSelectedProductId(baseItem.id);
+    setShowProductSuggestions(false);
+  };
+
+  const applyPosQuantity = () => {
+    const numeric = String(posKeyBuffer || "").replace(/[^\d]/g, "");
+    const qty = Math.min(100000, Math.max(1, Number(numeric || 1)));
+    if (selectedProductId) {
+      handleUpdateProduct(selectedProductId, { soLuong: qty });
+      return;
+    }
+    setNewProduct((prev) => ({ ...prev, soLuong: qty }));
+  };
+
+  const handlePosKeypadPress = (key) => {
+    if (key === "AC") {
+      setPosKeyBuffer("");
+      return;
+    }
+    if (key === "⌫") {
+      setPosKeyBuffer((prev) => prev.slice(0, -1));
+      return;
+    }
+    if (key === "OK") {
+      applyPosQuantity();
+      return;
+    }
+    setPosKeyBuffer((prev) => {
+      const next = `${prev}${key}`.replace(/[^\d]/g, "");
+      return next.slice(0, 6);
+    });
+  };
+
+  const startNewPosOrder = async () => {
+    const ok = window.confirm("Tạo đơn mới? Dữ liệu hiện tại sẽ được xóa.");
+    if (!ok) return;
+    resetCreateOrderForm({ clearDraft: true });
+    await loadOrderDefaults();
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isLoadingOrderDefaults)
@@ -851,28 +1436,26 @@ export default function CreateOrderPage() {
     });
   };
 
-  const openReceiptPage = (maPhieu, size, isPreview = false, previewData = null) => {
+  const openReceiptPage = async (
+    maPhieu,
+    size,
+    isPreview = false,
+    previewData = null,
+  ) => {
     if (!maPhieu) return;
-    const gasUrl = import.meta.env.VITE_GAS_WEBAPP_URL || "";
-    const isDev = import.meta.env.DEV;
-
-    let baseUrl = `${window.location.origin}${window.location.pathname}`;
-    if (!isDev) {
-      if (
-        document.referrer &&
-        document.referrer.includes("script.google.com")
-      ) {
-        baseUrl = document.referrer.split("?")[0].split("#")[0];
-      } else if (gasUrl) {
-        baseUrl = gasUrl;
-      }
-    }
-
-    let url = `${baseUrl}#print=${encodeURIComponent(maPhieu)}${size ? `&size=${size}` : ""}${isPreview ? "&preview=true" : ""}${previewData ? `&data=${encodeURIComponent(previewData)}` : ""}`;
-    const win = window.open(url, "_blank", "width=420,height=700");
-    if (!win) {
-      toast.error("Trình duyệt đang chặn cửa sổ in hóa đơn.");
-    }
+    await openReceiptWithStrategy(
+      {
+        code: String(maPhieu),
+        size: size || "58",
+        isPreview,
+        previewData: previewData || "",
+        autoPrint: true,
+        autoBack: true,
+      },
+      {
+        onInfo: (msg) => toast(msg, { icon: "🖨️" }),
+      },
+    );
   };
 
   const handlePrintPreview = () => {
@@ -933,6 +1516,9 @@ export default function CreateOrderPage() {
     0,
   );
   const totalItems = products.length; // Thay vì sum quantity, đếm số loại mặt hàng
+  const formattedDraftTime = draftUpdatedAt
+    ? new Date(draftUpdatedAt).toLocaleString("vi-VN")
+    : "";
   const pendingTotal = Number(pendingOrder?.totalAmount || 0);
   const isPartialOverpay =
     paymentStatus === "PARTIAL" &&
@@ -995,12 +1581,9 @@ export default function CreateOrderPage() {
     const maPhieu = orderData.orderInfo?.maPhieu || "";
 
     // Optimistic UI: clear form immediately, toast success, API runs in background
+    setIsSubmitting(true);
     closePaymentModal();
-    setProducts([]);
-    setCustomerInfo({ tenKhach: "", soDienThoai: "" });
-    setOrderInfo(createInitialOrderInfo());
-    setIsCustomerMode(false);
-    setIsSubmitting(false);
+    resetCreateOrderForm({ clearDraft: true });
 
     runInBackground({
       apiCall: () => createOrder(orderData),
@@ -1008,6 +1591,7 @@ export default function CreateOrderPage() {
       changeDescription: `Tạo đơn hàng "${maPhieu}"`,
       userName: user?.name || user?.email || "unknown",
       onComplete: (result) => {
+        setIsSubmitting(false);
         // Reload data in background regardless of result
         Promise.all([
           loadOrderDefaults(),
@@ -1026,9 +1610,83 @@ export default function CreateOrderPage() {
       hasError ? "border-rose-500 ring-1 ring-rose-500/20" : "border-slate-200"
     } bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all`;
   const customerSuggestions = getCustomerSuggestions(customerInfo.tenKhach);
+  const posProductSuggestions = getCatalogSuggestions(newProduct.tenSanPham);
+  const selectedProduct = products.find((p) => p.id === selectedProductId) || null;
+  const posKeypadKeys = ["7", "8", "9", "4", "5", "6", "1", "2", "3", "AC", "0", "⌫"];
+
+  const paymentModal = (
+    <PaymentConfirmModal
+      visible={showPaymentModal}
+      pendingOrder={pendingOrder}
+      closePaymentModal={closePaymentModal}
+      paymentStatus={paymentStatus}
+      setPaymentStatus={setPaymentStatus}
+      partialAmount={partialAmount}
+      setPartialAmount={setPartialAmount}
+      isPartialOverpay={isPartialOverpay}
+      paymentMethod={paymentMethod}
+      setPaymentMethod={setPaymentMethod}
+      partialReady={partialReady}
+      ensureBankConfig={ensureBankConfig}
+      isLoadingBankConfig={isLoadingBankConfig}
+      bankError={bankError}
+      bankConfig={bankConfig}
+      handlePrintPreview={handlePrintPreview}
+      handleConfirmPayment={handleConfirmPayment}
+      isSubmitting={isSubmitting}
+    />
+  );
+
+  if (isPosMode) {
+    return (
+      <PosCreateOrderLayout
+        newProduct={newProduct}
+        setNewProduct={setNewProduct}
+        showProductSuggestions={showProductSuggestions}
+        setShowProductSuggestions={setShowProductSuggestions}
+        getCatalogMatch={getCatalogMatch}
+        applyMatchedProduct={applyMatchedProduct}
+        orderInfo={orderInfo}
+        startNewPosOrder={startNewPosOrder}
+        posProductSuggestions={posProductSuggestions}
+        handleAddProductFromSuggestion={handleAddProductFromSuggestion}
+        totalItems={totalItems}
+        products={products}
+        selectedProductId={selectedProductId}
+        setSelectedProductId={setSelectedProductId}
+        handleUpdateProduct={handleUpdateProduct}
+        handleRemoveProduct={handleRemoveProduct}
+        customerInfo={customerInfo}
+        setCustomerInfo={setCustomerInfo}
+        showCustomerSuggestions={showCustomerSuggestions}
+        setShowCustomerSuggestions={setShowCustomerSuggestions}
+        customerSuggestions={customerSuggestions}
+        setOrderInfo={setOrderInfo}
+        handleAddProduct={handleAddProduct}
+        posKeyBuffer={posKeyBuffer}
+        posKeypadKeys={posKeypadKeys}
+        handlePosKeypadPress={handlePosKeypadPress}
+        selectedProduct={selectedProduct}
+        totalAmount={totalAmount}
+        hasDraft={hasDraft}
+        formattedDraftTime={formattedDraftTime}
+        saveDraftNow={saveDraftNow}
+        dismissKeyboard={dismissKeyboard}
+        handleSubmit={handleSubmit}
+        isSubmitting={isSubmitting}
+        paymentModal={paymentModal}
+      />
+    );
+  }
 
   return (
-    <main className="min-h-screen pb-24 bg-gradient-to-br from-slate-50 via-slate-50 to-rose-50/30">
+    <main
+      className={`min-h-screen pb-24 ${
+        isPosMode
+          ? "pos-create-order bg-slate-100"
+          : "bg-gradient-to-br from-slate-50 via-slate-50 to-rose-50/30"
+      }`}
+    >
       <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 md:py-8 pb-24">
         {/* Header */}
         <div className="mb-8 md:mb-10 animate-[fadeUp_0.4s_ease] max-w-3xl">
@@ -1047,6 +1705,75 @@ export default function CreateOrderPage() {
             </h2>
           </div>
         </div>
+
+        {isPosMode && (
+          <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => saveDraftNow({ silent: false })}
+                className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700"
+              >
+                Lưu nháp
+              </button>
+              <button
+                type="button"
+                onClick={() => restoreDraftNow({ silent: false })}
+                disabled={!hasDraft}
+                className={`rounded-xl px-3 py-2 text-sm font-semibold ${
+                  hasDraft
+                    ? "border border-cyan-200 bg-cyan-50 text-cyan-700"
+                    : "border border-slate-200 bg-slate-100 text-slate-400"
+                }`}
+              >
+                Khôi phục nháp
+              </button>
+              <button
+                type="button"
+                onClick={() => clearDraftNow({ silent: false })}
+                disabled={!hasDraft}
+                className={`rounded-xl px-3 py-2 text-sm font-semibold ${
+                  hasDraft
+                    ? "border border-slate-300 bg-slate-100 text-slate-700"
+                    : "border border-slate-200 bg-slate-100 text-slate-400"
+                }`}
+              >
+                Xóa nháp
+              </button>
+              <button
+                type="button"
+                onClick={duplicateLastProduct}
+                className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700"
+              >
+                Nhân bản dòng cuối
+              </button>
+              <button
+                type="button"
+                onClick={dismissKeyboard}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+              >
+                Ẩn bàn phím
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const ok = window.confirm("Xóa form hiện tại và xóa nháp?");
+                  if (!ok) return;
+                  resetCreateOrderForm({ clearDraft: true });
+                  toast.success("Đã xóa nhanh dữ liệu form.");
+                }}
+                className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700"
+              >
+                Xóa nhanh
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              {hasDraft && formattedDraftTime
+                ? `Đã có nháp. Cập nhật lần cuối: ${formattedDraftTime}`
+                : "Chưa có bản nháp gần đây."}
+            </p>
+          </section>
+        )}
 
         {/* Form */}
         <form
@@ -1617,213 +2344,7 @@ export default function CreateOrderPage() {
           </aside>
         </form>
       </div>
-      {showPaymentModal && pendingOrder && (
-        <div
-          className="fixed inset-0 z-[9900] bg-slate-900/40 p-4"
-          onClick={closePaymentModal}
-        >
-          <div
-            className="mx-auto mt-[10vh] w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl max-h-[85vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  Xác nhận thanh toán đơn hàng
-                </h3>
-                <p className="text-sm text-slate-500 mt-1">
-                  Mã phiếu: {pendingOrder?.orderData?.orderInfo?.maPhieu || "-"}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closePaymentModal}
-                className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100"
-              >
-                Đóng
-              </button>
-            </div>
-
-            <div className="mt-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
-                Trạng thái thanh toán
-              </p>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { code: "PAID", label: "Thanh toán tất" },
-                  { code: "PARTIAL", label: "Trả 1 phần" },
-                  { code: "DEBT", label: "Nợ" },
-                ].map((st) => (
-                  <button
-                    key={st.code}
-                    type="button"
-                    onClick={() => {
-                      setPaymentStatus(st.code);
-                      if (st.code === "DEBT") {
-                        setPaymentMethod("");
-                      }
-                    }}
-                    className={`py-2 px-1 text-[11px] font-semibold rounded-xl transition-all border ${
-                      paymentStatus === st.code
-                        ? "bg-rose-700 border-rose-700 text-white shadow-md shadow-rose-700/20"
-                        : "bg-white border-slate-200 text-slate-600 hover:border-rose-300 hover:bg-rose-50"
-                    }`}
-                  >
-                    {st.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {paymentStatus === "PARTIAL" && (
-              <div className="mt-4">
-                <label className="block text-sm font-semibold text-slate-800 mb-2">
-                  Số tiền đã trả trước
-                </label>
-                <CurrencyInput
-                  value={partialAmount || 0}
-                  onChange={(v) => setPartialAmount(v)}
-                  className={`w-full rounded-xl border bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all ${
-                    isPartialOverpay
-                      ? "border-rose-400 focus:border-rose-500 focus:ring-rose-500/20"
-                      : "border-slate-200 focus:border-rose-700 focus:ring-rose-700/20"
-                  }`}
-                />
-                <p
-                  className={`mt-1 text-xs ${
-                    isPartialOverpay ? "text-rose-600" : "text-slate-500"
-                  }`}
-                >
-                  {isPartialOverpay
-                    ? "Số tiền đã trả không được lớn hơn tổng đơn."
-                    : "Không được lớn hơn tổng đơn."}
-                </p>
-              </div>
-            )}
-
-            {paymentStatus !== "DEBT" && (
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod("cash")}
-                  disabled={!partialReady}
-                  className={`rounded-xl border px-4 py-2.5 text-sm font-semibold ${
-                    paymentMethod === "cash"
-                      ? "border-slate-400 bg-slate-50 text-slate-700"
-                      : "border-slate-200 text-slate-700 hover:bg-slate-50"
-                  } ${!partialReady ? "opacity-50 cursor-not-allowed" : ""}`}
-                >
-                  Tiền mặt
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPaymentMethod("bank");
-                    ensureBankConfig();
-                  }}
-                  disabled={!partialReady}
-                  className={`rounded-xl border px-4 py-2.5 text-sm font-semibold ${
-                    paymentMethod === "bank"
-                      ? "border-rose-200 bg-rose-50 text-rose-700"
-                      : "border-rose-200 text-rose-700 hover:bg-rose-50"
-                  } ${!partialReady ? "opacity-50 cursor-not-allowed" : ""}`}
-                >
-                  Chuyển khoản
-                </button>
-              </div>
-            )}
-            {!partialReady && paymentStatus === "PARTIAL" && (
-              <p className="mt-2 text-xs text-slate-500">
-                Nhập số tiền đã trả trước để chọn phương thức thanh toán.
-              </p>
-            )}
-
-            {paymentStatus !== "DEBT" && paymentMethod === "bank" && (
-              <div className="mt-4 rounded-xl border border-rose-200/60 bg-rose-50/40">
-                {isLoadingBankConfig && (
-                  <p className="text-sm text-slate-500">
-                    Đang tải thông tin ngân hàng...
-                  </p>
-                )}
-                {!isLoadingBankConfig && bankError && (
-                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                    {bankError}
-                  </div>
-                )}
-                {!isLoadingBankConfig && !bankError && bankConfig && (
-                  <div className="space-y-3">
-                    <div className="p-1 flex items-center justify-center">
-                      {(() => {
-                        const qrUrl = buildVietQrUrl({
-                          bankCode: bankConfig.bankCode,
-                          accountNumber: bankConfig.accountNumber,
-                          accountName: bankConfig.accountName,
-                          amount:
-                            paymentStatus === "PARTIAL"
-                              ? Number(partialAmount || 0)
-                              : Number(pendingOrder.totalAmount || 0),
-                          addInfo: (() => {
-                            const maPhieu =
-                              pendingOrder?.orderData?.orderInfo?.maPhieu || "";
-                            if (paymentStatus !== "PARTIAL") return maPhieu;
-                            const total = Number(pendingOrder.totalAmount || 0);
-                            const paid = Number(partialAmount || 0);
-                            const remain = Math.max(total - paid, 0);
-                            const remainText = remain.toLocaleString("vi-VN");
-                            return `${maPhieu} còn thiếu ${remainText}đ`;
-                          })(),
-                        });
-                        if (!qrUrl) return null;
-                        return (
-                          <img
-                            src={qrUrl}
-                            alt="VietQR"
-                            className="h-64 w-64 rounded-2xl border border-rose-200 bg-white object-contain p-3 shadow-sm"
-                          />
-                        );
-                      })()}
-                    </div>
-                    <p className="text-center text-xs text-slate-500">
-                      Quét mã để chuyển khoản
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={closePaymentModal}
-                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-              >
-                Hủy
-              </button>
-              <button
-                type="button"
-                onClick={handlePrintPreview}
-                className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 transition-all"
-              >
-                In hóa đơn
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmPayment}
-                disabled={isSubmitting}
-                className={`rounded-xl px-4 py-2 text-sm font-semibold text-white transition-all ${
-                  isSubmitting
-                    ? "bg-slate-400 cursor-not-allowed"
-                    : "bg-gradient-to-r from-rose-700 to-rose-500 hover:shadow-lg hover:shadow-rose-700/25"
-                }`}
-              >
-                {paymentStatus === "DEBT"
-                  ? "Xác nhận nợ"
-                  : "Xác nhận thanh toán"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {paymentModal}
     </main>
   );
 }

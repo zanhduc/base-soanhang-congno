@@ -1,5 +1,22 @@
+import {
+  publishInvoiceHSM,
+  cancelInvoiceHSM,
+  replaceInvoiceHSM,
+  sendErrorNoticeHSM,
+  getInvoiceDetailsHSM,
+  getInvoicePdfBlobHSM,
+} from "../../../core/easyInvoice.js";
 const IS_DEV = import.meta.env.DEV;
 const GAS_WEBAPP_URL = import.meta.env.VITE_GAS_WEBAPP_URL ?? "";
+
+// ===== Cấu hình Gửi Email khi có lỗi =====
+var ERROR_MAIL_CONFIG = {
+  enable: true,
+  developerEmail: "buituananhhy0@gmail.com", // Bắt buộc nhận
+  projectName: "Soạn Hàng - Công Nợ", // Tên dự án
+  customerName: "Tên Khách Hàng", // Tên khách hàng
+  customerLink: "Link Zalo/FB khách hàng", // Link liên hệ (FB, Zalo,...)
+};
 
 function gasRun(fnName, ...args) {
   return new Promise((resolve, reject) => {
@@ -39,13 +56,21 @@ function doGet(e) {
   if (params.printPdf) {
     return buildReceiptPdf_(String(params.printPdf || "").trim());
   }
-  
+  if (params.printText) {
+    return buildReceiptBridgeText_(
+      String(params.printText || "").trim(),
+      String(params.size || "58").trim(),
+    );
+  }
+
   if (params.sw === "1") {
-    var swCode = 
+    var swCode =
       "self.addEventListener('install', function(e) { self.skipWaiting(); });" +
       "self.addEventListener('activate', function(e) { e.waitUntil(self.clients.claim()); });" +
       "self.addEventListener('fetch', function(e) { });";
-    return ContentService.createTextOutput(swCode).setMimeType(ContentService.MimeType.JAVASCRIPT);
+    return ContentService.createTextOutput(swCode).setMimeType(
+      ContentService.MimeType.JAVASCRIPT,
+    );
   }
 
   return HtmlService.createHtmlOutputFromFile("index")
@@ -421,7 +446,9 @@ function getNextOrderFormDefaults() {
     }
 
     // Latest order is always at row 3, column C (ma phieu)
-    var latestCode = String(sheetDH.getRange(3, 3, 1, 1).getDisplayValues()[0][0] || "").trim();
+    var latestCode = String(
+      sheetDH.getRange(3, 3, 1, 1).getDisplayValues()[0][0] || "",
+    ).trim();
     var nextCode = incrementOrderCode_(latestCode, "DH00001");
 
     return {
@@ -541,7 +568,9 @@ function getImageUrlFromRichText_(richTextValue, fallbackText) {
       if (linkUrl) return String(linkUrl).trim();
     } catch (e) {}
   }
-  return String(fallbackText || (richTextValue ? richTextValue.getText() : "") || "").trim();
+  return String(
+    fallbackText || (richTextValue ? richTextValue.getText() : "") || "",
+  ).trim();
 }
 
 function getLastDataRowByCol_(sheet, col, dataStartRow) {
@@ -627,9 +656,7 @@ function syncProductCatalog_(ss, products) {
   if (lastDataRow >= dataStartRow) {
     // B:G = TEN SAN PHAM | ANH SAN PHAM | NHOM HANG | DON VI | GIA | GIA VON
     var numRows = lastDataRow - dataStartRow + 1;
-    var existing = sheetSP
-      .getRange(dataStartRow, 2, numRows, 6)
-      .getValues();
+    var existing = sheetSP.getRange(dataStartRow, 2, numRows, 6).getValues();
     var richTexts = sheetSP
       .getRange(dataStartRow, 3, numRows, 1)
       .getRichTextValues();
@@ -698,7 +725,8 @@ function syncProductCatalog_(ss, products) {
         normalizeProductKeyPart_(matched.nhomHang || "") !==
         normalizeProductKeyPart_(incomingProduct.nhomHang || "");
       var changedImage =
-        incomingProduct.anhSanPham && incomingProduct.anhSanPham !== matched.anhSanPham;
+        incomingProduct.anhSanPham &&
+        incomingProduct.anhSanPham !== matched.anhSanPham;
 
       var changedMulti =
         matched.donViLon !== incomingProduct.donViLon ||
@@ -719,7 +747,12 @@ function syncProductCatalog_(ss, products) {
             ]);
         }
         if (changedImage) {
-          setImageHyperlink_(sheetSP, matched.row, 3, incomingProduct.anhSanPham);
+          setImageHyperlink_(
+            sheetSP,
+            matched.row,
+            3,
+            incomingProduct.anhSanPham,
+          );
         }
 
         var isInventoryEnabled =
@@ -1201,7 +1234,8 @@ function updateProductCatalogItemInternal_(payload) {
     var donVi = String(p.donVi || "").trim();
     var donGiaBan = Math.max(parseMoneyNumber_(p.donGiaBan), 0);
     var giaVon = Math.max(parseMoneyNumber_(p.giaVon), 0);
-    var anhSanPham = p.anhSanPham !== undefined ? String(p.anhSanPham || "").trim() : null;
+    var anhSanPham =
+      p.anhSanPham !== undefined ? String(p.anhSanPham || "").trim() : null;
     var donViLon = String(p.donViLon || "").trim();
     var quyCach = Math.max(parseMoneyNumber_(p.quyCach), 0);
 
@@ -1227,7 +1261,10 @@ function updateProductCatalogItemInternal_(payload) {
 
     if (anhSanPham === null) {
       var rt = sheet.getRange(sourceRow, 3).getRichTextValue();
-      anhSanPham = getImageUrlFromRichText_(rt, String(sheet.getRange(sourceRow, 3).getValue() || ""));
+      anhSanPham = getImageUrlFromRichText_(
+        rt,
+        String(sheet.getRange(sourceRow, 3).getValue() || ""),
+      );
     }
 
     var targetRow = sourceRow;
@@ -1909,8 +1946,8 @@ function getOrderHistory() {
       var lastRow = sheet.getLastRow();
       if (lastRow < 3) return { success: true, data: [] };
 
-      // A:L = STT, NGÀY BÁN, MÃ PHIẾU, TÊN SẢN PHẨM, ĐƠN VỊ, SỐ LƯỢNG, GIÁ VỐN, ĐƠN GIÁ BÁN, THÀNH TIỀN, TỔNG HÓA ĐƠN, GHI CHÚ, TRẠNG THÁI
-      var rows = sheet.getRange(3, 1, lastRow - 2, 12).getDisplayValues();
+      // A:P = ... TRẠNG THÁI HĐĐT, MÃ CQT
+      var rows = sheet.getRange(3, 1, lastRow - 2, 16).getDisplayValues();
 
       var customerByMaPhieu = {};
       var phoneByMaPhieu = {};
@@ -1948,11 +1985,30 @@ function getOrderHistory() {
       var carryTongHoaDon = "";
       var carryGhiChu = "";
       var carryTrangThai = "";
+      var carryInvoiceNo = "";
+      var carryLookupCode = "";
+      var carryStatusText = "";
+      var carryTaxAuthCode = "";
 
       for (var i = 0; i < rows.length; i++) {
         var row = rows[i];
+
+        var rawMaPhieu = String(row[2] || "").trim();
+        if (rawMaPhieu && rawMaPhieu !== carryMaPhieu) {
+          // Khi chuyển sang một Đơn hàng mới, phải XÓA TRẮNG bộ nhớ đệm hóa đơn cũ
+          carryNgayBan = "";
+          carryTongHoaDon = "";
+          carryGhiChu = "";
+          carryTrangThai = "";
+          carryInvoiceNo = "";
+          carryLookupCode = "";
+          carryStatusText = "";
+          carryTaxAuthCode = "";
+          carryMaPhieu = rawMaPhieu;
+        }
+
         var ngayBan = String(row[1] || "").trim() || carryNgayBan;
-        var maPhieu = String(row[2] || "").trim() || carryMaPhieu;
+        var maPhieu = rawMaPhieu || carryMaPhieu;
         var tenSanPham = String(row[3] || "").trim();
         var donVi = String(row[4] || "").trim();
         var soLuong = parseMoneyNumber_(row[5]);
@@ -1963,11 +2019,21 @@ function getOrderHistory() {
         var ghiChu = String(row[10] || "").trim() || carryGhiChu;
         var trangThai = String(row[11] || "").trim() || carryTrangThai;
 
+        var invoiceNo = String(row[12] || "").trim() || carryInvoiceNo;
+        var lookupCode = String(row[13] || "").trim() || carryLookupCode;
+        var statusText = String(row[14] || "").trim() || carryStatusText;
+        var taxAuthCode = String(row[15] || "").trim() || carryTaxAuthCode;
+
         if (ngayBan) carryNgayBan = ngayBan;
-        if (maPhieu) carryMaPhieu = maPhieu;
         if (tongHoaDonCell) carryTongHoaDon = tongHoaDonCell;
         if (ghiChu) carryGhiChu = ghiChu;
         if (trangThai) carryTrangThai = trangThai;
+        if (invoiceNo) carryInvoiceNo = invoiceNo;
+        if (lookupCode) carryLookupCode = lookupCode;
+        if (statusText) carryStatusText = statusText;
+        if (taxAuthCode) carryTaxAuthCode = taxAuthCode;
+        var taxAuthCode = String(row[15] || "").trim() || carryTaxAuthCode;
+        if (taxAuthCode) carryTaxAuthCode = taxAuthCode;
 
         if (!maPhieu || !tenSanPham) continue;
 
@@ -1982,6 +2048,10 @@ function getOrderHistory() {
             tongHoaDon: parseMoneyNumber_(tongHoaDonCell),
             ghiChu: ghiChu || "-",
             trangThai: trangThai || "Đã thanh toán",
+            invoiceNo: invoiceNo,
+            lookupCode: lookupCode,
+            statusText: statusText,
+            taxAuthorityCode: taxAuthCode,
             products: [],
             _index: i,
           };
@@ -2199,6 +2269,70 @@ function getOrderByMaPhieu_(maPhieu) {
     }
   }
   return null;
+}
+
+function buildReceiptBridgeText_(maPhieu, size) {
+  if (!maPhieu) {
+    return ContentService.createTextOutput("Thieu ma phieu de in.");
+  }
+  var order = getOrderByMaPhieu_(maPhieu);
+  if (!order) {
+    return ContentService.createTextOutput(
+      "Khong tim thay hoa don can in: " + maPhieu,
+    );
+  }
+
+  var lines = [];
+  var products = order.products || [];
+  var total = parseMoneyNumber_(order.tongHoaDon);
+  if (!total) {
+    for (var i = 0; i < products.length; i++) {
+      var p = products[i] || {};
+      total += parseMoneyNumber_(p.soLuong) * parseMoneyNumber_(p.donGiaBan);
+    }
+  }
+  var tienNo = Math.max(parseMoneyNumber_(order.tienNo), 0);
+  var daTra = Math.max(total - tienNo, 0);
+  var paper = size === "80" ? "80mm" : "58mm";
+
+  lines.push("DULIA");
+  lines.push("Hoa don ban hang");
+  lines.push("Kho giay: " + paper);
+  lines.push("--------------------------------");
+  lines.push("Ma phieu: " + String(order.maPhieu || maPhieu));
+  lines.push("Ngay ban: " + String(order.ngayBan || "-"));
+  lines.push("Khach hang: " + String(order.tenKhach || "Khach le"));
+  if (order.soDienThoai) {
+    lines.push("SDT: " + String(order.soDienThoai));
+  }
+  lines.push("--------------------------------");
+
+  for (var j = 0; j < products.length; j++) {
+    var item = products[j] || {};
+    var name = String(item.tenHang || "San pham").trim();
+    var sl = parseMoneyNumber_(item.soLuong) || 0;
+    var price = parseMoneyNumber_(item.donGiaBan) || 0;
+    var lineTotal = parseMoneyNumber_(item.thanhTien) || sl * price;
+    lines.push(name);
+    lines.push("  " + sl + " x " + formatMoneyNumber_(price) + " = " + formatMoneyNumber_(lineTotal));
+  }
+
+  lines.push("--------------------------------");
+  lines.push("Tong cong: " + formatMoneyNumber_(total));
+  lines.push("Da tra: " + formatMoneyNumber_(daTra));
+  if (tienNo > 0) {
+    lines.push("Con no: " + formatMoneyNumber_(tienNo));
+  }
+  lines.push("Trang thai: " + String(order.trangThai || "Da thanh toan"));
+  if (order.ghiChu) {
+    lines.push("Ghi chu: " + String(order.ghiChu));
+  }
+  lines.push("--------------------------------");
+  lines.push("Cam on quy khach");
+
+  return ContentService.createTextOutput(lines.join("\n")).setMimeType(
+    ContentService.MimeType.TEXT,
+  );
 }
 
 function ensureReceiptFolder_() {
@@ -2424,6 +2558,53 @@ function deleteOrder(maPhieu) {
     if (res && res.success) bumpAppCacheVersion_();
     return res;
   });
+}
+
+/**
+ * Tải file PDF từ EasyInvoice và chuyển sang Base64 cho UI
+ */
+function downloadInvoicePDF(payload) {
+  try {
+    var maPhieu = String(payload.maPhieu || "").trim();
+    if (!maPhieu) throw new Error("Chưa truyền mã phiếu");
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("DON_HANG");
+    if (!sheet) throw new Error("Không tìm thấy sheet DON_HANG");
+
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 3) throw new Error("Không có dữ liệu đơn hàng");
+
+    // Lấy ikey từ cột N (Column 14)
+    var rows = sheet.getRange(3, 1, lastRow - 2, 14).getDisplayValues();
+    var lookupStr = "";
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][2] || "").trim() === maPhieu) {
+        lookupStr = String(rows[i][13] || "").trim();
+        break;
+      }
+    }
+
+    var ikey = maPhieu;
+    if (lookupStr.indexOf("|IKEY:") !== -1) {
+      ikey = lookupStr.split("|IKEY:")[1].trim();
+    }
+
+    var result = getInvoicePdfBlobHSM(ikey);
+    if (!result.success) throw new Error(result.message);
+
+    var blob = result.blob;
+    var base64 = Utilities.base64Encode(blob.getBytes());
+
+    return {
+      success: true,
+      base64: base64,
+      filename: "HoaDon_" + maPhieu + ".pdf",
+      contentType: "application/pdf",
+    };
+  } catch (e) {
+    return { success: false, message: "Lỗi tải PDF: " + e.message };
+  }
 }
 
 function deleteOrderInternal_(maPhieu) {
@@ -3791,10 +3972,17 @@ function createInventoryReceiptInternal_(payload) {
 
 function uploadImageToImgBB(base64Data) {
   try {
-    var apiKey = PropertiesService.getScriptProperties().getProperty("IMGBB_API_KEY");
-    if (!apiKey) throw new Error("Ch\u01b0a c\u1ea5u h\u00ecnh IMGBB_API_KEY trong Script Properties");
+    var apiKey =
+      PropertiesService.getScriptProperties().getProperty("IMGBB_API_KEY");
+    if (!apiKey)
+      throw new Error(
+        "Ch\u01b0a c\u1ea5u h\u00ecnh IMGBB_API_KEY trong Script Properties",
+      );
 
-    var cleanBase64 = String(base64Data || "").replace(/^data:image\/[^;]+;base64,/, "");
+    var cleanBase64 = String(base64Data || "").replace(
+      /^data:image\/[^;]+;base64,/,
+      "",
+    );
     if (!cleanBase64) throw new Error("D\u1eef li\u1ec7u \u1ea3nh tr\u1ed1ng");
 
     var response = UrlFetchApp.fetch("https://api.imgbb.com/1/upload", {
@@ -3817,8 +4005,396 @@ function uploadImageToImgBB(base64Data) {
     }
     throw new Error("ImgBB response invalid");
   } catch (e) {
-    return { success: false, message: "L\u1ed7i upload \u1ea3nh: " + e.message };
+    return {
+      success: false,
+      message: "L\u1ed7i upload \u1ea3nh: " + e.message,
+    };
   }
+}
+
+/* EASYINVOICE INTEGRATION */
+function issueEasyInvoice(payload) {
+  return runWithLockOrQueue_(
+    "ISSUE_EASYINVOICE",
+    { payload: payload },
+    function () {
+      try {
+        var maPhieu = String(payload.maPhieu || "").trim();
+        if (!maPhieu) throw new Error("Chưa truyền mã phiếu");
+
+        var ss = SpreadsheetApp.getActiveSpreadsheet();
+        var sheet = ss.getSheetByName("DON_HANG");
+        if (!sheet) throw new Error("Không tìm thấy sheet DON_HANG");
+
+        var lastRow = sheet.getLastRow();
+        if (lastRow < 3) throw new Error("Không có dữ liệu đơn hàng");
+
+        var rows = sheet.getRange(3, 1, lastRow - 2, 12).getDisplayValues();
+        var matchRows = [];
+        var startRowIdx = -1;
+        var carryMaPhieu = "";
+        var carryNgayBan = "";
+
+        for (var i = 0; i < rows.length; i++) {
+          var rowNgay = String(rows[i][1] || "").trim();
+          if (rowNgay) carryNgayBan = rowNgay;
+
+          var rowCode = String(rows[i][2] || "").trim();
+          if (rowCode) carryMaPhieu = rowCode;
+
+          if (carryMaPhieu === maPhieu) {
+            if (startRowIdx === -1) {
+              startRowIdx = i;
+              var orderNgayBan = carryNgayBan; // Lấy ngày của đơn
+            }
+
+            matchRows.push({
+              name: String(rows[i][3] || "").trim(),
+              unit: String(rows[i][4] || "").trim(),
+              quantity: parseMoneyNumber_(rows[i][5]),
+              price: parseMoneyNumber_(rows[i][7]),
+            });
+          }
+        }
+
+        if (matchRows.length === 0)
+          throw new Error("Không tìm thấy dữ liệu phiếu " + maPhieu);
+
+        // Tìm tên khách hàng, số điện thoại
+        var customerName = "Khách vãng lai";
+        var customerPhone = "";
+        var sheetKH = ss.getSheetByName("CONG_NO_KHACH");
+        if (sheetKH) {
+          var lastRowKH = sheetKH.getLastRow();
+          if (lastRowKH >= 3) {
+            var khRows = sheetKH
+              .getRange(3, 2, lastRowKH - 2, 4)
+              .getDisplayValues();
+            for (var c = 0; c < khRows.length; c++) {
+              if (String(khRows[c][3] || "").trim() === maPhieu) {
+                customerName = String(khRows[c][0] || "").trim();
+                customerPhone = String(khRows[c][2] || "").trim();
+                break;
+              }
+            }
+          }
+        }
+
+        var orderData = {
+          id: maPhieu,
+          ngayBan:
+            orderNgayBan ||
+            Utilities.formatDate(new Date(), "Asia/Ho_Chi_Minh", "dd/MM/yyyy"),
+          customerName: customerName,
+          customerPhone: customerPhone,
+          products: matchRows,
+        };
+
+        var result = publishInvoiceHSM(orderData);
+
+        if (result.success) {
+          var actualRow = startRowIdx + 3;
+          var mergedRowCount = matchRows.length;
+
+          // Unmerge first if necessary (optional, but robust)
+          try {
+            sheet.getRange(actualRow, 13, mergedRowCount, 4).breakApart(); // M:P
+          } catch (e) {}
+
+          var actualLookupCode =
+            result.lookupCode + (result.ikey ? "|IKEY:" + result.ikey : "");
+          var range = sheet.getRange(actualRow, 13, 1, 4); // Columns M, N, O, P
+          range.setValues([
+            [
+              result.invoiceNo,
+              actualLookupCode,
+              result.statusText,
+              result.taxAuthorityCode || "",
+            ],
+          ]);
+
+          if (mergedRowCount > 1) {
+            sheet
+              .getRange(actualRow, 13, mergedRowCount, 1)
+              .merge()
+              .setVerticalAlignment("middle");
+            sheet
+              .getRange(actualRow, 14, mergedRowCount, 1)
+              .merge()
+              .setVerticalAlignment("middle");
+            sheet
+              .getRange(actualRow, 15, mergedRowCount, 1)
+              .merge()
+              .setVerticalAlignment("middle");
+            sheet
+              .getRange(actualRow, 16, mergedRowCount, 1)
+              .merge()
+              .setVerticalAlignment("middle");
+          }
+
+          return { success: true, message: result.message, data: result };
+        } else {
+          throw new Error(result.message);
+        }
+      } catch (e) {
+        return { success: false, message: e.message };
+      }
+    },
+  );
+}
+
+function cancelEasyInvoice(payload) {
+  return runWithLockOrQueue_(
+    "CANCEL_EASYINVOICE",
+    { payload: payload },
+    function () {
+      try {
+        var maPhieu = String(payload.maPhieu || "").trim();
+        if (!maPhieu) throw new Error("Chưa truyền mã phiếu");
+
+        var ss = SpreadsheetApp.getActiveSpreadsheet();
+        var sheet = ss.getSheetByName("DON_HANG");
+        if (!sheet) throw new Error("Không tìm thấy sheet DON_HANG");
+
+        var lastRow = sheet.getLastRow();
+        if (lastRow < 3) throw new Error("Không có dữ liệu đơn hàng");
+
+        var rows = sheet.getRange(3, 1, lastRow - 2, 14).getDisplayValues(); // Read up to column 14 (N)
+        var startRowIdx = -1;
+        var matchCount = 0;
+        var carryMaPhieu = "";
+        var oldLookupStr = "";
+
+        for (var i = 0; i < rows.length; i++) {
+          var rowCode = String(rows[i][2] || "").trim();
+          if (rowCode) carryMaPhieu = rowCode;
+          if (carryMaPhieu === maPhieu) {
+            if (startRowIdx === -1) {
+              startRowIdx = i;
+              oldLookupStr = String(rows[i][13] || "").trim(); // Column N
+            }
+            matchCount++;
+          }
+        }
+
+        if (startRowIdx === -1)
+          throw new Error("Không tìm thấy dữ liệu phiếu " + maPhieu);
+
+        // Extract Ikey if present, else default to maPhieu
+        var actualIkey = maPhieu;
+        if (oldLookupStr.indexOf("|IKEY:") !== -1) {
+          actualIkey = oldLookupStr.split("|IKEY:")[1].trim();
+        }
+
+        var result = cancelInvoiceHSM(actualIkey);
+
+        if (result.success) {
+          var actualRow = startRowIdx + 3;
+          // Cập nhật trạng thái thành Đã hủy. Số hóa đơn (cột 13) và mã tra cứu (cột 14) vẫn giữ để back-trace
+          sheet.getRange(actualRow, 15, matchCount, 1).setValue("Đã hủy (5)");
+          return { success: true, message: result.message };
+        } else if (
+          result.message.indexOf("không hợp lệ") !== -1 ||
+          result.message.indexOf("không được phép huỷ") !== -1
+        ) {
+          // SMART CANCEL: Nếu hủy trực tiếp bị lỗi (do TT78 đã ký), ta thử gửi Thông báo sai sót (Mẫu 04)
+          var detailResult = getInvoiceDetailsHSM(actualIkey);
+          if (detailResult.success) {
+            var inv = detailResult.data;
+            var noticeResult = sendErrorNoticeHSM({
+              pattern: inv.Pattern,
+              serial: inv.Serial,
+              no: inv.No,
+              arisingDate: inv.ArisingDate,
+              taxAuthorityCode: inv.TaxAuthorityCode,
+              note: "Người mua hủy đơn hàng",
+            });
+
+            if (noticeResult.success) {
+              var actualRow = startRowIdx + 3;
+              sheet
+                .getRange(actualRow, 15, matchCount, 1)
+                .setValue("Đã hủy (Mẫu 04)");
+              return {
+                success: true,
+                message:
+                  "Đã gửi thông báo sai sót (Mẫu 04) thành công. Hóa đơn sẽ được hệ thống hủy sau khi CQT chấp nhận.",
+              };
+            } else {
+              throw new Error("Lỗi gửi Mẫu 04: " + noticeResult.message);
+            }
+          } else {
+            throw new Error(
+              "Không thể lấy thông tin hđ để gửi Mẫu 04: " +
+                detailResult.message,
+            );
+          }
+        } else {
+          throw new Error(result.message);
+        }
+      } catch (e) {
+        return { success: false, message: e.message };
+      }
+    },
+  );
+}
+
+function replaceEasyInvoice(payload) {
+  return runWithLockOrQueue_(
+    "REPLACE_EASYINVOICE",
+    { payload: payload },
+    function () {
+      try {
+        var maPhieu = String(payload.maPhieu || "").trim();
+        if (!maPhieu) throw new Error("Chưa truyền mã phiếu");
+
+        var ss = SpreadsheetApp.getActiveSpreadsheet();
+        var sheet = ss.getSheetByName("DON_HANG");
+        if (!sheet) throw new Error("Không tìm thấy sheet DON_HANG");
+
+        var lastRow = sheet.getLastRow();
+        if (lastRow < 3) throw new Error("Không có dữ liệu đơn hàng");
+
+        var rows = sheet.getRange(3, 1, lastRow - 2, 14).getDisplayValues(); // Đọc ra cả cột M, N
+        var startRowIdx = -1;
+        var matchRows = [];
+        var carryMaPhieu = "";
+        var carryNgayBan = "";
+        var orderNgayBan = "";
+        var oldLookupStr = "";
+
+        for (var i = 0; i < rows.length; i++) {
+          var rowNgay = String(rows[i][1] || "").trim();
+          if (rowNgay) carryNgayBan = rowNgay;
+
+          var rowCode = String(rows[i][2] || "").trim();
+          if (rowCode) carryMaPhieu = rowCode;
+
+          if (carryMaPhieu === maPhieu) {
+            if (startRowIdx === -1) {
+              startRowIdx = i;
+              orderNgayBan = carryNgayBan;
+              oldLookupStr = String(rows[i][13] || "").trim(); // Cột N (14)
+            }
+
+            matchRows.push({
+              name: String(rows[i][3] || "").trim(),
+              unit: String(rows[i][4] || "").trim(),
+              quantity: parseMoneyNumber_(rows[i][5]),
+              price: parseMoneyNumber_(rows[i][7]),
+            });
+          }
+        }
+
+        if (startRowIdx === -1)
+          throw new Error("Không tìm thấy dữ liệu phiếu " + maPhieu);
+
+        // Lấy Old Ikey từ chuỗi LookupCode cũ (Cột N)
+        var oldIkey = maPhieu;
+        if (oldLookupStr.indexOf("|IKEY:") !== -1) {
+          var parts = oldLookupStr.split("|IKEY:");
+          oldIkey = parts[1].trim();
+        }
+
+        var customerName = "Khách vãng lai";
+        var customerPhone = "";
+        var sheetKH = ss.getSheetByName("CONG_NO_KHACH");
+        if (sheetKH) {
+          var lastRowKH = sheetKH.getLastRow();
+          if (lastRowKH >= 3) {
+            var khRows = sheetKH
+              .getRange(3, 2, lastRowKH - 2, 4)
+              .getDisplayValues();
+            for (var c = 0; c < khRows.length; c++) {
+              if (String(khRows[c][3] || "").trim() === maPhieu) {
+                customerName = String(khRows[c][0] || "").trim();
+                customerPhone = String(khRows[c][2] || "").trim();
+                break;
+              }
+            }
+          }
+        }
+
+        var orderData = {
+          id: maPhieu,
+          ngayBan:
+            orderNgayBan ||
+            Utilities.formatDate(new Date(), "Asia/Ho_Chi_Minh", "dd/MM/yyyy"),
+          customerName: customerName,
+          customerPhone: customerPhone,
+          products: matchRows,
+        };
+
+        var newIkey = Utilities.getUuid().replace(/-/g, "").toLowerCase();
+
+        // Fetch original invoice details for RelatedInvoice (TT78 requirements)
+        var relatedInvoiceInfo = null;
+        var detailResult = getInvoiceDetailsHSM(oldIkey);
+        if (detailResult.success) {
+          relatedInvoiceInfo = {
+            pattern: detailResult.data.Pattern,
+            serial: detailResult.data.Serial,
+            no: detailResult.data.No,
+            arisingDate: detailResult.data.ArisingDate,
+          };
+        }
+
+        var result = replaceInvoiceHSM(
+          oldIkey,
+          newIkey,
+          orderData,
+          relatedInvoiceInfo,
+        );
+
+        if (result.success) {
+          var actualRow = startRowIdx + 3;
+          var mergedRowCount = matchRows.length;
+
+          // Unmerge first if necessary
+          try {
+            sheet.getRange(actualRow, 13, mergedRowCount, 4).breakApart(); // M:P
+          } catch (e) {}
+
+          var actualLookupCode =
+            result.lookupCode + (result.ikey ? "|IKEY:" + result.ikey : "");
+          var range = sheet.getRange(actualRow, 13, 1, 4); // Columns M, N, O, P
+          range.setValues([
+            [
+              result.invoiceNo,
+              actualLookupCode,
+              result.statusText,
+              result.taxAuthorityCode || "",
+            ],
+          ]);
+
+          if (mergedRowCount > 1) {
+            sheet
+              .getRange(actualRow, 13, mergedRowCount, 1)
+              .merge()
+              .setVerticalAlignment("middle");
+            sheet
+              .getRange(actualRow, 14, mergedRowCount, 1)
+              .merge()
+              .setVerticalAlignment("middle");
+            sheet
+              .getRange(actualRow, 15, mergedRowCount, 1)
+              .merge()
+              .setVerticalAlignment("middle");
+            sheet
+              .getRange(actualRow, 16, mergedRowCount, 1)
+              .merge()
+              .setVerticalAlignment("middle");
+          }
+
+          return { success: true, message: result.message, data: result };
+        } else {
+          throw new Error(result.message);
+        }
+      } catch (e) {
+        return { success: false, message: e.message };
+      }
+    },
+  );
 }
 
 /* CLIENT_API_WRAPPERS */
@@ -3827,6 +4403,12 @@ const getUserInfoClient = (email) => call("getUserInfo", email);
 const getDemoAccountsClient = () => call("getDemoAccounts");
 const getGlobalNoticeClient = () => call("getGlobalNotice");
 const getNextOrderFormDefaultsClient = () => call("getNextOrderFormDefaults");
+const issueEasyInvoiceClient = (payload) => call("issueEasyInvoice", payload);
+const cancelEasyInvoiceClient = (payload) => call("cancelEasyInvoice", payload);
+const replaceEasyInvoiceClient = (payload) =>
+  call("replaceEasyInvoice", payload);
+const downloadInvoicePDFClient = (payload) =>
+  call("downloadInvoicePDF", payload);
 const getNextInventoryReceiptDefaultsClient = () =>
   call("getNextInventoryReceiptDefaults");
 const getProductCatalogClient = () => call("getProductCatalog");
@@ -3886,6 +4468,11 @@ export const gasAdapter = {
   getSupplierDebts: getSupplierDebtsClient,
   updateSupplierDebt: updateSupplierDebtClient,
   uploadImageToImgBB: uploadImageToImgBBClient,
+  issueEasyInvoice: issueEasyInvoiceClient,
+  cancelEasyInvoice: cancelEasyInvoiceClient,
+  replaceEasyInvoice: replaceEasyInvoiceClient,
+  downloadInvoicePDF: downloadInvoicePDFClient,
+  logAction: (payload) => call("logAction", payload),
   formatAllSheets: () => call("formatAllSheets"),
 };
 
@@ -3958,18 +4545,73 @@ function formatAllSheets_() {
 
 // ===== Action Log =====
 
+function sendErrorEmailNotification_(
+  userName,
+  changeDescription,
+  errorMessage,
+) {
+  if (!ERROR_MAIL_CONFIG.enable) return;
+  try {
+    var toEmail =
+      ERROR_MAIL_CONFIG.developerEmail || Session.getEffectiveUser().getEmail();
+    if (!toEmail) return;
+
+    var ssUrl = "";
+    try {
+      ssUrl = SpreadsheetApp.getActiveSpreadsheet().getUrl();
+    } catch (e) {
+      ssUrl = "Không lấy được link";
+    }
+
+    var subject = "⚠️ [System Error] Dự án: " + ERROR_MAIL_CONFIG.projectName;
+    var body =
+      "Phát hiện lỗi trong hệ thống dự án Apps Script:\n\n" +
+      "- Tên dự án: " +
+      ERROR_MAIL_CONFIG.projectName +
+      "\n" +
+      "- Tên khách hàng: " +
+      ERROR_MAIL_CONFIG.customerName +
+      "\n" +
+      "- Link liên hệ khách hàng: " +
+      ERROR_MAIL_CONFIG.customerLink +
+      "\n" +
+      "- Link Sheet dự án: " +
+      ssUrl +
+      "\n\n" +
+      "=== THEO DÕI LỖI ===\n" +
+      "- Người dùng thao tác: " +
+      userName +
+      "\n" +
+      "- Hành động đang thao tác: " +
+      changeDescription +
+      "\n" +
+      "- Chi tiết thông báo lỗi: " +
+      errorMessage +
+      "\n\n" +
+      "Vui lòng vào Sheet dự án hoặc xem Log để kiểm tra, khắc phục lỗi hệ thống.";
+
+    MailApp.sendEmail({
+      to: toEmail,
+      subject: subject,
+      body: body,
+    });
+  } catch (e) {
+    Logger.log("Không thể gửi email cảnh báo: " + e.message);
+  }
+}
+
 function getOrCreateLogSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Log");
   if (sheet) return sheet;
 
   sheet = ss.insertSheet("Log");
-  sheet.getRange(1, 1, 1, 5).setValues([
-    ["Ngày giờ", "Người dùng", "Thay đổi", "Trạng thái", "Thông báo lỗi"]
-  ]);
-  sheet.getRange(1, 1, 1, 5)
-    .setFontWeight("bold")
-    .setBackground("#f1f5f9");
+  sheet
+    .getRange(1, 1, 1, 5)
+    .setValues([
+      ["Ngày giờ", "Người dùng", "Thay đổi", "Trạng thái", "Thông báo lỗi"],
+    ]);
+  sheet.getRange(1, 1, 1, 5).setFontWeight("bold").setBackground("#f1f5f9");
   sheet.setColumnWidth(1, 160);
   sheet.setColumnWidth(2, 120);
   sheet.setColumnWidth(3, 350);
@@ -3983,7 +4625,9 @@ function logAction(payload) {
     var p = payload || {};
     var userName = String(p.userName || "unknown").trim();
     var changeDescription = String(p.changeDescription || "").trim();
-    var status = String(p.status || "SUCCESS").trim().toUpperCase();
+    var status = String(p.status || "SUCCESS")
+      .trim()
+      .toUpperCase();
     var errorMessage = String(p.errorMessage || "").trim();
 
     var tz = Session.getScriptTimeZone() || "Asia/Ho_Chi_Minh";
@@ -3997,9 +4641,11 @@ function logAction(payload) {
       sheet.insertRowsAfter(sheet.getMaxRows(), 1);
     }
 
-    sheet.getRange(newRow, 1, 1, 5).setValues([
-      [timestamp, userName, changeDescription, status, errorMessage]
-    ]);
+    sheet
+      .getRange(newRow, 1, 1, 5)
+      .setValues([
+        [timestamp, userName, changeDescription, status, errorMessage],
+      ]);
 
     // Color code the status cell
     var statusCell = sheet.getRange(newRow, 4);
@@ -4007,6 +4653,9 @@ function logAction(payload) {
       statusCell.setFontColor("#16a34a");
     } else if (status === "ERROR") {
       statusCell.setFontColor("#dc2626").setFontWeight("bold");
+
+      // Gửi warning email
+      sendErrorEmailNotification_(userName, changeDescription, errorMessage);
     }
 
     return { success: true };

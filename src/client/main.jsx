@@ -21,6 +21,27 @@ const globalStyles = `
     color: var(--text);
   }
 
+  body.pos-mode {
+    background: #f1f5f9;
+    touch-action: manipulation;
+  }
+
+  body.pos-mode button,
+  body.pos-mode [role="button"],
+  body.pos-mode a {
+    min-height: 44px;
+  }
+
+  body.pos-mode input,
+  body.pos-mode select,
+  body.pos-mode textarea {
+    font-size: 16px !important;
+  }
+
+  body.pos-mode .global-notice-banner {
+    bottom: 78px !important;
+  }
+
   @keyframes fadeUp {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
@@ -99,10 +120,28 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   </React.StrictMode>
 )
 
-if ("serviceWorker" in navigator) {
+const shouldRegisterServiceWorker = (() => {
+  if (!("serviceWorker" in navigator)) return false;
+  if (!window.isSecureContext) return false;
+  try {
+    if (window.self !== window.top) return false;
+  } catch (e) {
+    return false;
+  }
+  const host = String(window.location.hostname || "").toLowerCase();
+  if (
+    host.endsWith("script.googleusercontent.com") ||
+    host.endsWith("script.google.com")
+  ) {
+    return false;
+  }
+  return true;
+})();
+
+if (shouldRegisterServiceWorker) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("?sw=1").catch((err) => {
-      console.log("Service Worker registration failed:", err);
+    navigator.serviceWorker.register("?sw=1").catch(() => {
+      // Ignore registration failure in non-PWA environments.
     });
   });
 }

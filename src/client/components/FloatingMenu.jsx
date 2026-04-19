@@ -5,8 +5,14 @@ import brandLogo from "../assets/logo-dulia.jpg";
 
 const BRAND_LOGO_URL = brandLogo;
 
-export default function FloatingMenu({ currentPath, onNavigate }) {
+export default function FloatingMenu({
+  currentPath,
+  onNavigate,
+  appMode = "web",
+  onChangeAppMode = () => {},
+}) {
   const { user, logout } = useUser();
+  const isPosMode = appMode === "pos";
   const [isOpen, setIsOpen] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
@@ -14,6 +20,10 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
   if (!user) return null;
 
   useEffect(() => {
+    if (isPosMode) {
+      setIsVisible(true);
+      return;
+    }
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
 
@@ -31,7 +41,7 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
 
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
-  }, [lastScrollY]);
+  }, [lastScrollY, isPosMode]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -55,7 +65,9 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
           const val = res.data === "true";
           setShowInventory(val);
           localStorage.setItem("enable_inventory", String(val));
-          window.dispatchEvent(new CustomEvent("inventory_setting_changed", { detail: val }));
+          window.dispatchEvent(
+            new CustomEvent("inventory_setting_changed", { detail: val }),
+          );
         }
       } catch (e) {
         console.error("Lỗi khi tải cài đặt kho:", e);
@@ -68,7 +80,9 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
     const newState = !showInventory;
     setShowInventory(newState);
     localStorage.setItem("enable_inventory", String(newState));
-    window.dispatchEvent(new CustomEvent("inventory_setting_changed", { detail: newState }));
+    window.dispatchEvent(
+      new CustomEvent("inventory_setting_changed", { detail: newState }),
+    );
     try {
       await setAppSetting({ key: "enable_inventory", value: newState });
     } catch (e) {
@@ -88,6 +102,7 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
       : []),
     { id: "debt", label: "Quản lý công nợ", icon: "📒" },
     { id: "stats", label: "Thống kê", icon: "📊" },
+    // { id: "print-diagnostic", label: "Tự kiểm tra in", icon: "🖨️" },
   ];
 
   const handleNav = (id) => {
@@ -95,11 +110,18 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
     onNavigate(id);
   };
 
+  const posTabs = [
+    { id: "create-order", label: "Soạn đơn", icon: "🧾" },
+    { id: "history", label: "Lịch sử", icon: "🕘" },
+    { id: "debt", label: "Công nợ", icon: "📒" },
+    { id: "print-diagnostic", label: "In", icon: "🖨️" },
+  ];
+
   return (
     <>
       <div
         id="mega-menu-container"
-        className="fixed top-4 right-4 z-[9000] flex flex-col items-end md:hidden"
+        className={`fixed top-4 right-4 z-[9000] flex flex-col items-end ${isPosMode ? "" : "md:hidden"}`}
       >
         <button
           onClick={(e) => {
@@ -205,6 +227,16 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
                 />
               </button>
             </div>
+            {/* <button
+              onClick={() => onChangeAppMode(isPosMode ? "web" : "pos")}
+              className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold transition-colors text-sm ${
+                isPosMode
+                  ? "text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
+                  : "text-slate-700 bg-slate-100 hover:bg-slate-200"
+              }`}
+            >
+              {isPosMode ? "POS mode: Bật" : "POS mode: Tắt"}
+            </button> */}
             <button
               onClick={logout}
               className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-red-600 font-semibold hover:bg-red-50 transition-colors text-sm"
@@ -215,7 +247,11 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
         </div>
       </div>
 
-      <aside className="hidden md:flex fixed left-4 top-4 bottom-4 z-[8000] w-64 flex-col rounded-3xl border border-slate-200 bg-white/95 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.08)]">
+      <aside
+        className={`fixed left-4 top-4 bottom-4 z-[8000] w-64 flex-col rounded-3xl border border-slate-200 bg-white/95 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.08)] ${
+          isPosMode ? "hidden" : "hidden md:flex"
+        }`}
+      >
         <div className="p-4 border-b border-slate-100 space-y-3">
           <div className="flex items-center gap-3">
             <img
@@ -290,6 +326,16 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
             </button>
           </div>
           <button
+            onClick={() => onChangeAppMode(isPosMode ? "web" : "pos")}
+            className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold transition-colors text-sm ${
+              isPosMode
+                ? "text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
+                : "text-slate-700 bg-slate-100 hover:bg-slate-200"
+            }`}
+          >
+            {isPosMode ? "POS mode: Bật" : "POS mode: Tắt"}
+          </button>
+          <button
             onClick={logout}
             className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-red-600 font-semibold hover:bg-red-50 transition-colors text-sm"
           >
@@ -297,6 +343,32 @@ export default function FloatingMenu({ currentPath, onNavigate }) {
           </button>
         </div>
       </aside>
+
+      {isPosMode && (
+        <nav className="fixed bottom-0 left-0 right-0 z-[9100] border-t border-slate-200 bg-white/95 backdrop-blur-xl px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div className="mx-auto grid w-full max-w-3xl grid-cols-4 gap-2">
+            {posTabs.map((item) => {
+              const isActive = currentPath === item.id;
+              return (
+                <button
+                  key={`pos-tab-${item.id}`}
+                  onClick={() => handleNav(item.id)}
+                  className={`rounded-xl px-2 py-2.5 text-center transition-colors ${
+                    isActive
+                      ? "bg-rose-50 text-rose-700"
+                      : "bg-slate-50 text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  <div className="text-lg leading-none">{item.icon}</div>
+                  <div className="mt-1 text-[11px] font-semibold">
+                    {item.label}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      )}
     </>
   );
 }

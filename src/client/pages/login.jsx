@@ -25,7 +25,11 @@ const prefetchOrderDefaults = async () => {
   }
 }
 
-export default function LoginPage({ onLoginSuccess }) {
+export default function LoginPage({
+  onLoginSuccess,
+  appMode = "web",
+  onChangeAppMode = () => {},
+}) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
@@ -87,6 +91,19 @@ export default function LoginPage({ onLoginSuccess }) {
           />
           <h1 className="text-3xl font-bold bg-gradient-to-br from-rose-700 to-rose-900 bg-clip-text text-transparent">DULI Accounting</h1>
           <p className="text-sm mt-1 text-slate-500">Hệ thống dành riêng cho bạn</p>
+          <div className="mt-3 flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => onChangeAppMode(appMode === "pos" ? "web" : "pos")}
+              className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
+                appMode === "pos"
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                  : "border-slate-300 bg-slate-50 text-slate-600"
+              }`}
+            >
+              {appMode === "pos" ? "POS mode: Bật" : "POS mode: Tắt"}
+            </button>
+          </div>
         </div>
 
         <form onSubmit={handleLogin} className="flex flex-col gap-5">

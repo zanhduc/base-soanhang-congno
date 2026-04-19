@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useHashRouter } from "./hooks/useHashRouter";
 import LoginPage from "./pages/login";
 import CreateOrderPage from "./pages/create-order";
@@ -9,67 +9,215 @@ import InventoryPage from "./pages/inventory";
 import StockPage from "./pages/stock";
 import DebtPage from "./pages/debt";
 import StatsPage from "./pages/stats";
+import PrintDiagnosticPage from "./pages/print-diagnostic";
 import FloatingMenu from "./components/FloatingMenu";
 import GlobalNoticeBanner from "./components/GlobalNoticeBanner";
 import { UserProvider, useUser } from "./context";
 import { Toaster } from "react-hot-toast";
+import { ensurePrintBridgeReady } from "./utils/printStrategy";
+import {
+  applyAppModeToDom,
+  readAppMode,
+  writeAppMode,
+} from "./utils/appMode";
+
+const toBool = (value) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true";
+};
+
+const getHashSearchParams = (hashValue) => {
+  const hash = String(hashValue || "").replace(/^#\/?/, "").trim();
+  if (!hash) return new URLSearchParams();
+  const queryIndex = hash.indexOf("?");
+  if (queryIndex >= 0) {
+    return new URLSearchParams(hash.slice(queryIndex + 1));
+  }
+  return new URLSearchParams(hash);
+};
+
+const buildPrintParams = (source) => {
+  const code = String(source?.code || "").trim();
+  if (!code) return null;
+  return {
+    code,
+    size: source?.size || "",
+    isPreview: !!source?.isPreview,
+    previewDataStr: source?.previewDataStr || "",
+    previewDataKey: source?.previewDataKey || "",
+    autoPrint: !!source?.autoPrint,
+    autoBack: !!source?.autoBack,
+    dryRun: !!source?.dryRun,
+  };
+};
+
+const getPrintParamsFromLocalUrl = () => {
+  const hashParams = getHashSearchParams(window.location.hash);
+  const searchParams = new URLSearchParams(window.location.search);
+  return buildPrintParams({
+    code: hashParams.get("print") || searchParams.get("print"),
+    size: hashParams.get("size") || searchParams.get("size"),
+    isPreview:
+      hashParams.has("preview") ||
+      searchParams.has("preview") ||
+      toBool(searchParams.get("preview")) ||
+      toBool(hashParams.get("preview")),
+    previewDataStr: hashParams.get("data") || searchParams.get("data") || "",
+    previewDataKey:
+      hashParams.get("datakey") || searchParams.get("datakey") || "",
+    autoPrint:
+      toBool(hashParams.get("autoprint")) ||
+      toBool(searchParams.get("autoprint")),
+    autoBack:
+      toBool(hashParams.get("autoback")) || toBool(searchParams.get("autoback")),
+    dryRun: toBool(hashParams.get("dryrun")) || toBool(searchParams.get("dryrun")),
+  });
+};
+
+const getPrintParamsFromGasLocation = (location) => {
+  const hashParams = getHashSearchParams(location?.hash || "");
+  return buildPrintParams({
+    code: hashParams.get("print") || location?.parameter?.print,
+    size: hashParams.get("size") || location?.parameter?.size,
+    isPreview:
+      hashParams.has("preview") ||
+      toBool(hashParams.get("preview")) ||
+      toBool(location?.parameter?.preview),
+    previewDataStr: hashParams.get("data") || location?.parameter?.data || "",
+    previewDataKey:
+      hashParams.get("datakey") || location?.parameter?.datakey || "",
+    autoPrint:
+      toBool(hashParams.get("autoprint")) ||
+      toBool(location?.parameter?.autoprint),
+    autoBack:
+      toBool(hashParams.get("autoback")) ||
+      toBool(location?.parameter?.autoback),
+    dryRun:
+      toBool(hashParams.get("dryrun")) || toBool(location?.parameter?.dryrun),
+  });
+};
 
 function AppContent() {
-  const { user, setUser, logout } = useUser();
+  const { user, setUser } = useUser();
   const { currentPath, navigate } = useHashRouter();
   const [initDone, setInitDone] = useState(false);
   const [printParams, setPrintParams] = useState(null);
+  const [appMode, setAppModeState] = useState(() => readAppMode());
+  const isPosMode = appMode === "pos";
+
+  const setAppMode = useCallback((nextMode) => {
+    const next = writeAppMode(nextMode);
+    setAppModeState(next);
+  }, []);
 
   useEffect(() => {
-    // 1. Lọc `print` từ dev mode (trình duyệt thông thường)
-    const localHashStr = window.location.hash.replace(/^#\/?/, "");
-    const localHashParams = new URLSearchParams(localHashStr);
-    const localSearch = new URLSearchParams(window.location.search);
-    
-    let pendingCode = localHashParams.get("print") || localSearch.get("print");
-    let pendingSize = localHashParams.get("size") || localSearch.get("size");
-    let pendingPreview = localHashParams.has("preview") || localSearch.has("preview");
+    applyAppModeToDom(appMode);
+  }, [appMode]);
 
-    // 2. Chờ API của GAS để lấy thông số bị chặn bởi iframe (Bắt buộc cho Production)
-    if (typeof google !== "undefined" && google?.script?.url) {
-      google.script.url.getLocation(function (location) {
-        // Phân tích cả hash lẫn parameter của parent window
-        const gasHashParams = new URLSearchParams((location?.hash || "").replace(/^#\/?/, ""));
-        const gasCode = gasHashParams.get("print") || location?.parameter?.print;
-        const gasSize = gasHashParams.get("size") || location?.parameter?.size;
-        const gasPreview = gasHashParams.has("preview") || location?.parameter?.preview === "true";
-        const gasData = gasHashParams.get("data") || location?.parameter?.data;
-        
-        if (gasCode) {
-          pendingCode = gasCode;
-          pendingSize = gasSize;
-          pendingPreview = gasPreview;
-          localHashParams.set("data", gasData); // just to reuse scoping logic
-        }
-        
-        if (pendingCode) {
-           setPrintParams({ 
-             code: pendingCode, 
-             size: pendingSize, 
-             isPreview: pendingPreview, 
-             previewDataStr: localHashParams.get("data") 
-           });
-        }
-        setInitDone(true);
-      });
-    } else {
-      // DEV (không có google API)
-      if (pendingCode) {
-         setPrintParams({ 
-           code: pendingCode, 
-           size: pendingSize, 
-           isPreview: pendingPreview, 
-           previewDataStr: localHashParams.get("data") 
-         });
-      }
-      setInitDone(true);
-    }
+  useEffect(() => {
+    const syncModeFromLocation = () => {
+      const next = readAppMode();
+      setAppModeState(next);
+    };
+    window.addEventListener("hashchange", syncModeFromLocation);
+    window.addEventListener("popstate", syncModeFromLocation);
+    return () => {
+      window.removeEventListener("hashchange", syncModeFromLocation);
+      window.removeEventListener("popstate", syncModeFromLocation);
+    };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    let didInit = false;
+
+    const finishInit = () => {
+      if (!didInit && mounted) {
+        didInit = true;
+        setInitDone(true);
+      }
+    };
+
+    const applyLocalParams = () => {
+      const localPrintParams = getPrintParamsFromLocalUrl();
+      if (mounted) setPrintParams(localPrintParams);
+      return localPrintParams;
+    };
+
+    const resolvePrintParams = ({ init = false } = {}) => {
+      const localParams = applyLocalParams();
+      if (localParams) {
+        if (init) finishInit();
+        return;
+      }
+
+      if (typeof google !== "undefined" && google?.script?.url?.getLocation) {
+        google.script.url.getLocation((location) => {
+          if (!mounted) return;
+          const gasParams = getPrintParamsFromGasLocation(location);
+          setPrintParams(gasParams);
+          if (init) finishInit();
+        });
+        return;
+      }
+
+      if (mounted) setPrintParams(null);
+      if (init) finishInit();
+    };
+
+    resolvePrintParams({ init: true });
+
+    const onHashChanged = () => resolvePrintParams({ init: false });
+    window.addEventListener("hashchange", onHashChanged);
+    window.addEventListener("popstate", onHashChanged);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener("hashchange", onHashChanged);
+      window.removeEventListener("popstate", onHashChanged);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    ensurePrintBridgeReady().catch(() => {
+      // Keep app usable; printing flow will show explicit error when user prints.
+    });
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !isPosMode) return;
+    if (!("wakeLock" in navigator) || !window.isSecureContext) return;
+    let released = false;
+    let wakeLock = null;
+
+    const requestWakeLock = async () => {
+      if (released) return;
+      try {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => {
+          wakeLock = null;
+        });
+      } catch (e) {
+        // Ignore unsupported/blocked wake lock.
+      }
+    };
+
+    requestWakeLock();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible" && !wakeLock) {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      released = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (wakeLock) {
+        wakeLock.release().catch(() => {});
+      }
+    };
+  }, [user, isPosMode]);
 
   if (!initDone) {
     return (
@@ -82,45 +230,64 @@ function AppContent() {
   }
 
   if (!user) {
-    return <LoginPage onLoginSuccess={setUser} />;
+    return (
+      <LoginPage
+        onLoginSuccess={setUser}
+        appMode={appMode}
+        onChangeAppMode={setAppMode}
+      />
+    );
   }
 
   if (printParams) {
-    return <ReceiptPage 
-      code={printParams.code} 
-      size={printParams.size} 
-      isPreview={printParams.isPreview} 
-      previewDataStr={printParams.previewDataStr} 
-    />;
+    return (
+      <ReceiptPage
+        code={printParams.code}
+        size={printParams.size}
+        isPreview={printParams.isPreview}
+        previewDataStr={printParams.previewDataStr}
+        previewDataKey={printParams.previewDataKey}
+        autoPrint={printParams.autoPrint}
+        autoBack={printParams.autoBack}
+        dryRun={printParams.dryRun}
+      />
+    );
   }
 
   if (["admin", "user"].includes(user.role)) {
     const renderPage = () => {
       switch (currentPath) {
         case "create-order":
-          return <CreateOrderPage user={user} />;
+          return <CreateOrderPage user={user} appMode={appMode} />;
         case "history":
-          return <HistoryPage user={user} />;
+          return <HistoryPage user={user} appMode={appMode} />;
         case "products":
-          return <ProductsPage user={user} />;
+          return <ProductsPage user={user} appMode={appMode} />;
         case "inventory":
-          return <InventoryPage user={user} />;
+          return <InventoryPage user={user} appMode={appMode} />;
         case "stock":
-          return <StockPage user={user} />;
+          return <StockPage user={user} appMode={appMode} />;
         case "debt":
-          return <DebtPage user={user} />;
+          return <DebtPage user={user} appMode={appMode} />;
         case "stats":
-          return <StatsPage user={user} />;
+          return <StatsPage user={user} appMode={appMode} />;
+        case "print-diagnostic":
+          return <PrintDiagnosticPage appMode={appMode} />;
         default:
-          return <CreateOrderPage user={user} />;
+          return <CreateOrderPage user={user} appMode={appMode} />;
       }
     };
 
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className={`min-h-screen ${isPosMode ? "bg-slate-100 pb-24" : "bg-slate-50"}`}>
         <GlobalNoticeBanner />
-        <div className="md:pl-72">{renderPage()}</div>
-        <FloatingMenu currentPath={currentPath} onNavigate={navigate} />
+        <div className={isPosMode ? "" : "md:pl-72"}>{renderPage()}</div>
+        <FloatingMenu
+          currentPath={currentPath}
+          onNavigate={navigate}
+          appMode={appMode}
+          onChangeAppMode={setAppMode}
+        />
       </div>
     );
   }

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { getOrderHistory } from "../api";
 import toast from "react-hot-toast";
+import { getPreviewDataByKey } from "../utils/printStrategy";
+import { fireAndForgetPrintLog } from "../utils/printLogger";
 
 const fmt = (n) => Number(n || 0).toLocaleString("vi-VN");
 const toNum = (v) => Number(String(v ?? "").replace(/[^\d.-]/g, "")) || 0;
@@ -20,25 +22,65 @@ const getPaperWidth = (size) => {
   return "80mm";
 };
 
-export default function ReceiptPage({ code, size, isPreview, previewDataStr }) {
+const getPaperMargin = (size) => {
+  if (size === "pdf") return "6mm";
+  if (size === "58") return "2mm";
+  return "2.5mm";
+};
+
+export default function ReceiptPage({
+  code,
+  size,
+  isPreview,
+  previewDataStr,
+  previewDataKey,
+  autoPrint = false,
+  autoBack = false,
+  dryRun = false,
+}) {
   const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState(null);
   const [currentSize, setCurrentSize] = useState(size || "58");
+  const [didAutoPrint, setDidAutoPrint] = useState(false);
+
+  const tryParsePreviewData = () => {
+    const candidates = [
+      String(previewDataStr || ""),
+      getPreviewDataByKey(previewDataKey),
+    ].filter(Boolean);
+    for (const raw of candidates) {
+      try {
+        return JSON.parse(raw);
+      } catch (e) {
+        try {
+          return JSON.parse(decodeURIComponent(raw));
+        } catch (inner) {
+          // try next candidate
+        }
+      }
+    }
+    return null;
+  };
 
   useEffect(() => {
     const load = async (retryCount = 0) => {
       setLoading(true);
 
-      if (isPreview && previewDataStr) {
-        try {
-          const data = JSON.parse(previewDataStr);
-          if (String(data.maPhieu || "").trim() === String(code || "").trim()) {
-            setOrder(data);
-            setLoading(false);
-            return;
-          }
-        } catch (e) {
-          console.error("Lỗi parse previewDataStr", e);
+      if (isPreview) {
+        const parsedPreview = tryParsePreviewData();
+        if (
+          parsedPreview &&
+          String(parsedPreview.maPhieu || "").trim() === String(code || "").trim()
+        ) {
+          setOrder(parsedPreview);
+          fireAndForgetPrintLog({
+            event: "receipt_data_loaded_preview",
+            code,
+            size: size || "58",
+            mode: "browser",
+          });
+          setLoading(false);
+          return;
         }
       }
 
@@ -50,6 +92,12 @@ export default function ReceiptPage({ code, size, isPreview, previewDataStr }) {
           );
           if (found) {
             setOrder(found);
+            fireAndForgetPrintLog({
+              event: "receipt_data_loaded_history",
+              code,
+              size: size || "58",
+              mode: "browser",
+            });
             setLoading(false);
           } else {
             if (retryCount < 3) {
@@ -57,6 +105,14 @@ export default function ReceiptPage({ code, size, isPreview, previewDataStr }) {
               return;
             }
             setOrder(null);
+            fireAndForgetPrintLog({
+              event: "receipt_not_found_after_retry",
+              code,
+              size: size || "58",
+              mode: "browser",
+              status: "ERROR",
+              message: "Không tìm thấy hóa đơn trong lịch sử sau khi retry",
+            });
             setLoading(false);
             toast.error("Không tìm thấy hóa đơn cần in.");
           }
@@ -66,6 +122,14 @@ export default function ReceiptPage({ code, size, isPreview, previewDataStr }) {
             return;
           }
           setOrder(null);
+          fireAndForgetPrintLog({
+            event: "receipt_load_failed_response",
+            code,
+            size: size || "58",
+            mode: "browser",
+            status: "ERROR",
+            message: res?.message || "getOrderHistory response lỗi",
+          });
           setLoading(false);
           toast.error(res?.message || "Không tải được hóa đơn.");
         }
@@ -75,12 +139,20 @@ export default function ReceiptPage({ code, size, isPreview, previewDataStr }) {
           return;
         }
         setOrder(null);
+        fireAndForgetPrintLog({
+          event: "receipt_load_failed_exception",
+          code,
+          size: size || "58",
+          mode: "browser",
+          status: "ERROR",
+          message: String(e?.message || e || "Lỗi tải hóa đơn"),
+        });
         setLoading(false);
         toast.error("Không tải được hóa đơn.");
       }
     };
     if (code) load();
-  }, [code, isPreview]);
+  }, [code, isPreview, previewDataStr, previewDataKey]);
 
   const view = useMemo(() => {
     if (!order) return null;
@@ -104,19 +176,112 @@ export default function ReceiptPage({ code, size, isPreview, previewDataStr }) {
   }, [order]);
 
   const paperWidth = getPaperWidth(currentSize);
+  const paperMargin = getPaperMargin(currentSize);
   const paperLabel =
     currentSize === "58" ? "58mm" : currentSize === "pdf" ? "PDF/A4" : "80mm";
   const isCompact = currentSize === "58";
   const isPdf = currentSize === "pdf";
+  const isThermal = !isPdf;
+
+  useEffect(() => {
+    if (!autoPrint || dryRun || loading || !order || didAutoPrint) return;
+    const timer = setTimeout(() => {
+      setDidAutoPrint(true);
+      fireAndForgetPrintLog({
+        event: "receipt_autoprint_triggered",
+        code,
+        size: currentSize || "58",
+        mode: "browser",
+      });
+      window.print();
+      if (autoBack) {
+        setTimeout(() => {
+          if (window.history.length > 1) {
+            window.history.back();
+            return;
+          }
+          window.close();
+        }, 180);
+      }
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [autoPrint, dryRun, loading, order, didAutoPrint, autoBack]);
+
+  useEffect(() => {
+    if (!autoPrint || dryRun || !autoBack) return;
+    const afterPrintHandler = () => {
+      fireAndForgetPrintLog({
+        event: "receipt_afterprint_autoback",
+        code,
+        size: currentSize || "58",
+        mode: "browser",
+      });
+      setTimeout(() => {
+        if (window.history.length > 1) {
+          window.history.back();
+          return;
+        }
+        window.close();
+      }, 120);
+    };
+    window.addEventListener("afterprint", afterPrintHandler);
+    return () => window.removeEventListener("afterprint", afterPrintHandler);
+  }, [autoPrint, dryRun, autoBack]);
+
+  const handleClose = () => {
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    window.close();
+  };
+
+  const handleManualPrint = () => {
+    fireAndForgetPrintLog({
+      event: "receipt_manual_print_click",
+      code,
+      size: currentSize || "58",
+      mode: "browser",
+    });
+    window.print();
+  };
 
   return (
     <main className="min-h-screen bg-slate-100 py-6">
       <style>{`
-        @page { size: ${paperWidth} auto; margin: 6mm; }
+        @page { size: ${paperWidth} auto; margin: ${paperMargin}; }
+        .thermal-receipt {
+          font-family: "Courier New", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          line-height: 1.25;
+          letter-spacing: 0;
+          color: #111827;
+        }
+        .thermal-row {
+          display: flex;
+          justify-content: space-between;
+          gap: 8px;
+          align-items: flex-start;
+        }
+        .thermal-left {
+          min-width: 0;
+          flex: 1;
+          overflow-wrap: anywhere;
+        }
+        .thermal-right {
+          flex-shrink: 0;
+          text-align: right;
+          white-space: nowrap;
+        }
         @media print {
           .no-print { display: none !important; }
           body { background: white; }
-          main { padding: 0 !important; }
+          main { padding: 0 !important; background: white !important; }
+          .thermal-shell {
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            border: none !important;
+            padding: 0 !important;
+          }
         }
       `}</style>
 
@@ -125,6 +290,11 @@ export default function ReceiptPage({ code, size, isPreview, previewDataStr }) {
           <div className="text-sm font-bold text-slate-800">
             In phiếu: <span className="text-rose-600">{code || "-"}</span>
           </div>
+          {dryRun && (
+            <div className="text-[11px] font-semibold text-amber-700">
+              Chế độ test khô: không gọi hộp thoại in
+            </div>
+          )}
           <select
             className="text-[11px] bg-white border border-slate-200 rounded-md px-2 py-1 outline-none focus:border-rose-400 font-semibold text-slate-600 cursor-pointer shadow-sm"
             value={currentSize}
@@ -138,14 +308,14 @@ export default function ReceiptPage({ code, size, isPreview, previewDataStr }) {
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => window.print()}
+            onClick={handleManualPrint}
             className="rounded-xl bg-gradient-to-r from-rose-700 to-rose-500 px-4 py-2.5 text-[11px] font-bold text-white hover:shadow-lg hover:shadow-rose-700/30 transition-all"
           >
             In ngay
           </button>
           <button
             type="button"
-            onClick={() => window.close()}
+            onClick={handleClose}
             className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50 transition-all shadow-sm"
           >
             Đóng
@@ -153,9 +323,9 @@ export default function ReceiptPage({ code, size, isPreview, previewDataStr }) {
         </div>
       </div>
 
-      <div className="mx-auto w-full px-4" style={{ maxWidth: paperWidth }}>
+      <div className={`mx-auto w-full ${isThermal ? "px-0" : "px-4"}`} style={{ maxWidth: paperWidth }}>
         <div
-          className={`bg-white shadow-lg ${isPdf ? "rounded-none p-8" : isCompact ? "rounded-2xl p-3" : "rounded-2xl p-4"}`}
+          className={`thermal-shell bg-white ${isPdf ? "shadow-lg rounded-none p-8" : isCompact ? "rounded-none p-2" : "rounded-none p-2.5"}`}
         >
           {loading && (
             <p className="text-center text-sm text-slate-500">
@@ -168,9 +338,7 @@ export default function ReceiptPage({ code, size, isPreview, previewDataStr }) {
             </p>
           )}
           {!loading && order && view && !isPdf && (
-            <div
-              className={`space-y-3 text-slate-900 ${isCompact ? "text-[11px]" : "text-[12px]"}`}
-            >
+            <div className={`thermal-receipt space-y-2.5 ${isCompact ? "text-[11px]" : "text-[12px]"}`}>
               <div className="text-center">
                 <div
                   className={`font-black tracking-wide ${isCompact ? "text-sm" : "text-base"}`}
@@ -189,53 +357,49 @@ export default function ReceiptPage({ code, size, isPreview, previewDataStr }) {
                 </div>
               </div>
 
-              <div className="border-t border-dashed border-slate-200 pt-2 space-y-1">
-                <div className="flex items-start justify-between gap-2">
+              <div className="border-t border-dashed border-slate-300 pt-2 space-y-1">
+                <div className="thermal-row">
                   <span className="text-slate-500">Khách</span>
-                  <strong className="text-right leading-tight">
+                  <strong className="thermal-right leading-tight">
                     {view.customerName}
                   </strong>
                 </div>
                 {view.phone && (
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="thermal-row">
                     <span className="text-slate-500">SĐT</span>
-                    <strong className="text-right leading-tight">
+                    <strong className="thermal-right leading-tight">
                       {view.phone}
                     </strong>
                   </div>
                 )}
-                <div className="flex items-start justify-between gap-2">
+                <div className="thermal-row">
                   <span className="text-slate-500">TT</span>
-                  <strong className="text-right leading-tight">
+                  <strong className="thermal-right leading-tight">
                     {view.statusText}
                   </strong>
                 </div>
-                <div className="flex items-start justify-between gap-2">
+                <div className="thermal-row">
                   <span className="text-slate-500">Ghi chú</span>
-                  <strong className="text-right leading-tight">
+                  <strong className="thermal-right leading-tight">
                     {view.note}
                   </strong>
                 </div>
               </div>
 
-              <div className="border-t border-dashed border-slate-200 pt-2 space-y-2">
+              <div className="border-t border-dashed border-slate-300 pt-2 space-y-2">
                 {(order.products || []).map((p, idx) => (
                   <div key={`${order.maPhieu}-r-${idx}`}>
-                    <div
-                      className={`font-semibold ${isCompact ? "text-[11px]" : "text-[12px]"}`}
-                    >
+                    <div className={`thermal-left font-semibold ${isCompact ? "text-[11px]" : "text-[12px]"}`}>
                       {p.tenSanPham}{" "}
                       {p.donVi ? (
                         <span className="text-slate-400">({p.donVi})</span>
                       ) : null}
                     </div>
-                    <div
-                      className={`flex justify-between text-slate-500 ${isCompact ? "text-[10px]" : "text-[11px]"}`}
-                    >
-                      <span>
+                    <div className={`thermal-row text-slate-600 ${isCompact ? "text-[10px]" : "text-[11px]"}`}>
+                      <span className="thermal-left">
                         SL {fmt(p.soLuong)} x {fmt(p.donGiaBan)}
                       </span>
-                      <span className="font-semibold text-slate-900">
+                      <span className="thermal-right font-semibold text-slate-900">
                         {fmt(toNum(p.soLuong) * toNum(p.donGiaBan))}
                       </span>
                     </div>
@@ -243,26 +407,24 @@ export default function ReceiptPage({ code, size, isPreview, previewDataStr }) {
                 ))}
               </div>
 
-              <div className="border-t border-dashed border-slate-200 pt-2 space-y-1">
-                <div
-                  className={`flex justify-between font-bold ${isCompact ? "text-[12px]" : "text-[13px]"}`}
-                >
+              <div className="border-t border-dashed border-slate-300 pt-2 space-y-1">
+                <div className={`thermal-row font-bold ${isCompact ? "text-[12px]" : "text-[13px]"}`}>
                   <span>Tổng cộng</span>
-                  <span>{fmt(view.total)}</span>
+                  <span className="thermal-right">{fmt(view.total)}</span>
                 </div>
-                <div className="flex justify-between">
+                <div className="thermal-row">
                   <span>Phải trả</span>
-                  <strong>{fmt(view.daTra)}</strong>
+                  <strong className="thermal-right">{fmt(view.daTra)}</strong>
                 </div>
                 {view.tienNo > 0 && (
-                  <div className="flex justify-between">
+                  <div className="thermal-row">
                     <span>Còn nợ</span>
-                    <strong>{fmt(view.tienNo)}</strong>
+                    <strong className="thermal-right">{fmt(view.tienNo)}</strong>
                   </div>
                 )}
               </div>
 
-              <div className="border-t border-dashed border-slate-200 pt-2 text-center text-[10.5px] text-slate-400">
+              <div className="border-t border-dashed border-slate-300 pt-2 text-center text-[10.5px] text-slate-500">
                 Hóa đơn được tạo bởi{" "}
                 <span className="font-extrabold text-rose-600">DULIA</span>
               </div>
