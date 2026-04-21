@@ -1,6 +1,7 @@
 import React from "react"
 import ReactDOM from "react-dom/client"
 import App from "./app"
+import "./styles.css"
 
 const globalStyles = `
   :root {
@@ -62,23 +63,6 @@ const globalStyles = `
 
 const head = document.head || document.getElementsByTagName("head")[0]
 if (head) {
-  const linkPreconnect1 = document.createElement("link")
-  linkPreconnect1.rel = "preconnect"
-  linkPreconnect1.href = "https://fonts.googleapis.com"
-  head.appendChild(linkPreconnect1)
-
-  const linkPreconnect2 = document.createElement("link")
-  linkPreconnect2.rel = "preconnect"
-  linkPreconnect2.href = "https://fonts.gstatic.com"
-  linkPreconnect2.crossOrigin = "anonymous"
-  head.appendChild(linkPreconnect2)
-
-  const linkFont = document.createElement("link")
-  linkFont.rel = "stylesheet"
-  linkFont.href =
-    "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-  head.appendChild(linkFont)
-
   // Cấu hình CSS an toàn cho iframe và mobile (100dvh thay vì 100vh)
   const iframeGlobalStyles = `
     ${globalStyles}

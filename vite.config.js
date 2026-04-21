@@ -64,7 +64,7 @@ export default defineConfig(({ mode }) => {
       emptyOutDir: true,
       cssCodeSplit: false,
       assetsInlineLimit: 100000000,
-      minify: false,
+      minify: "esbuild",
     },
   };
 });
