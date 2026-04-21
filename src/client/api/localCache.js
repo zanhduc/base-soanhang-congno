@@ -1,9 +1,12 @@
 const CACHE_PREFIX = "soanhang_api_cache_v1:";
 const AUTH_USER_STORAGE_KEY = "soanhang.auth.user";
 const inflightRefresh = new Map();
+const lastRefreshAt = new Map();
 
 function canUseStorage() {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+  return (
+    typeof window !== "undefined" && typeof window.localStorage !== "undefined"
+  );
 }
 
 function nowMs() {
@@ -35,13 +38,24 @@ function safeParse(raw) {
   }
 }
 
-export function readCache(cacheKey) {
+export function readCache(cacheKey, maxAgeMs = 0) {
   if (!canUseStorage()) return null;
   const raw = window.localStorage.getItem(buildStorageKey(cacheKey));
   if (!raw) return null;
   const parsed = safeParse(raw);
   if (!parsed || typeof parsed !== "object") return null;
   if (!Object.prototype.hasOwnProperty.call(parsed, "response")) return null;
+
+  const updatedAt = Number(parsed.updatedAt || 0);
+  if (maxAgeMs > 0 && updatedAt > 0 && nowMs() - updatedAt > maxAgeMs) {
+    try {
+      window.localStorage.removeItem(buildStorageKey(cacheKey));
+    } catch (_) {
+      // Ignore remove failures.
+    }
+    return null;
+  }
+
   return parsed;
 }
 
@@ -52,7 +66,10 @@ export function writeCache(cacheKey, response) {
     updatedAt: nowMs(),
   };
   try {
-    window.localStorage.setItem(buildStorageKey(cacheKey), JSON.stringify(payload));
+    window.localStorage.setItem(
+      buildStorageKey(cacheKey),
+      JSON.stringify(payload),
+    );
   } catch (_) {
     // Ignore storage quota/write issues to keep business flow stable.
   }
@@ -93,8 +110,13 @@ function dispatchCacheUpdated(cacheKey, response) {
   );
 }
 
-function refreshInBackground(cacheKey, fn, args) {
+function refreshInBackground(cacheKey, fn, args, refreshCooldownMs) {
   if (inflightRefresh.has(cacheKey)) return;
+
+  const now = nowMs();
+  const last = Number(lastRefreshAt.get(cacheKey) || 0);
+  if (refreshCooldownMs > 0 && now - last < refreshCooldownMs) return;
+
   const runner = (async () => {
     try {
       const fresh = await fn(...args);
@@ -108,19 +130,48 @@ function refreshInBackground(cacheKey, fn, args) {
       // Silent background refresh failure.
     }
   })();
+
+  lastRefreshAt.set(cacheKey, now);
   inflightRefresh.set(cacheKey, runner);
   runner.finally(() => {
     inflightRefresh.delete(cacheKey);
   });
 }
 
-export function createLocalFirstReader(cacheKey, fn) {
+export function createLocalFirstReader(cacheKey, fn, options = {}) {
+  const ttlMs = Math.max(0, Number(options.ttlMs || 0));
+  const refreshCooldownMs = Math.max(
+    0,
+    Number(options.refreshCooldownMs || 900000),
+  );
+  const refreshAfterMs = Math.max(
+    0,
+    Number(
+      options.refreshAfterMs ||
+        (ttlMs > 0 ? Math.floor(ttlMs * 0.9) : 900000),
+    ),
+  );
+  const backgroundMode =
+    options.backgroundMode === "disabled"
+      ? "disabled"
+      : options.backgroundMode === "always"
+        ? "always"
+        : "stale-only";
+
   return async (...args) => {
-    const cached = readCache(cacheKey);
+    const cached = readCache(cacheKey, ttlMs);
     if (cached && cached.response) {
-      refreshInBackground(cacheKey, fn, args);
+      if (backgroundMode !== "disabled") {
+        const ageMs = Math.max(0, nowMs() - Number(cached.updatedAt || 0));
+        const shouldRefresh =
+          backgroundMode === "always" || ageMs >= refreshAfterMs;
+        if (shouldRefresh) {
+          refreshInBackground(cacheKey, fn, args, refreshCooldownMs);
+        }
+      }
       return cached.response;
     }
+
     const fresh = await fn(...args);
     if (isSuccessResponse(fresh)) {
       writeCache(cacheKey, fresh);

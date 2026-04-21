@@ -24,6 +24,21 @@ const CACHE_KEYS = {
 };
 
 const READ_KEYS = Object.values(CACHE_KEYS);
+const BG_SPARSE_15M = {
+  backgroundMode: "stale-only",
+  refreshAfterMs: 15 * 60 * 1000,
+  refreshCooldownMs: 15 * 60 * 1000,
+};
+const BG_SPARSE_30M = {
+  backgroundMode: "stale-only",
+  refreshAfterMs: 30 * 60 * 1000,
+  refreshCooldownMs: 30 * 60 * 1000,
+};
+const BG_SPARSE_60M = {
+  backgroundMode: "stale-only",
+  refreshAfterMs: 60 * 60 * 1000,
+  refreshCooldownMs: 60 * 60 * 1000,
+};
 
 export const call = adapter.call;
 export const helloServer = adapter.helloServer;
@@ -37,10 +52,12 @@ export const getNextInventoryReceiptDefaults =
 export const getProductCatalog = createLocalFirstReader(
   CACHE_KEYS.productCatalog,
   adapter.getProductCatalog,
+  BG_SPARSE_30M,
 );
 export const getBankConfig = createLocalFirstReader(
   CACHE_KEYS.bankConfig,
   adapter.getBankConfig,
+  BG_SPARSE_60M,
 );
 export const updateProductCatalogItem = createMutationWithInvalidation(
   adapter.updateProductCatalogItem,
@@ -57,14 +74,17 @@ export const deleteProductCatalogItem = createMutationWithInvalidation(
 export const getCustomerCatalog = createLocalFirstReader(
   CACHE_KEYS.customerCatalog,
   adapter.getCustomerCatalog,
+  BG_SPARSE_30M,
 );
 export const getSupplierCatalog = createLocalFirstReader(
   CACHE_KEYS.supplierCatalog,
   adapter.getSupplierCatalog,
+  BG_SPARSE_30M,
 );
 export const getDebtCustomers = createLocalFirstReader(
   CACHE_KEYS.debtCustomers,
   adapter.getDebtCustomers,
+  BG_SPARSE_15M,
 );
 export const updateDebtCustomer = createMutationWithInvalidation(
   adapter.updateDebtCustomer,
@@ -77,6 +97,7 @@ export const settleAllDebtCustomers = createMutationWithInvalidation(
 export const getOrderHistory = createLocalFirstReader(
   CACHE_KEYS.orderHistory,
   adapter.getOrderHistory,
+  BG_SPARSE_15M,
 );
 export const createReceiptPdf = adapter.createReceiptPdf;
 export const createOrder = createMutationWithInvalidation(adapter.createOrder, [
@@ -91,6 +112,7 @@ export const createInventoryReceipt = createMutationWithInvalidation(
 export const getInventorySuggestions = createLocalFirstReader(
   CACHE_KEYS.inventorySuggestions,
   adapter.getInventorySuggestions,
+  BG_SPARSE_30M,
 );
 export const updateOrder = createMutationWithInvalidation(adapter.updateOrder, [
   CACHE_KEYS.orderHistory,
@@ -105,16 +127,19 @@ export const deleteOrder = createMutationWithInvalidation(adapter.deleteOrder, [
 export const getInventory = createLocalFirstReader(
   CACHE_KEYS.inventory,
   adapter.getInventory,
+  BG_SPARSE_15M,
 );
 export const getReceiptHistory = createLocalFirstReader(
   CACHE_KEYS.receiptHistory,
   adapter.getReceiptHistory,
+  BG_SPARSE_15M,
 );
 export const getAppSetting = adapter.getAppSetting;
 export const setAppSetting = adapter.setAppSetting;
 export const getSupplierDebts = createLocalFirstReader(
   CACHE_KEYS.supplierDebts,
   adapter.getSupplierDebts,
+  BG_SPARSE_15M,
 );
 export const updateSupplierDebt = createMutationWithInvalidation(
   adapter.updateSupplierDebt,
