@@ -511,6 +511,15 @@ export default function DebtPage() {
   const [activeTab, setActiveTab] = useState("customers");
   const [showSupplierTab, setShowSupplierTab] = useState(false);
   const [settleConfirmTarget, setSettleConfirmTarget] = useState(null);
+  const shouldShowGuestDebtRow = (row) => {
+    if (!isGuestCustomer(row?.tenKhach)) return true;
+    const statusKey = foldText(row?.trangThai || "");
+    const isDebtStatus =
+      statusKey.includes("no") ||
+      statusKey.includes("tra mot phan") ||
+      statusKey.includes("tra 1 phan");
+    return isDebtStatus || toNum(row?.tienNo) > 0;
+  };
 
   const loadDebts = async () => {
     setLoading(true);
@@ -518,7 +527,7 @@ export default function DebtPage() {
       if (activeTab === "customers") {
         const res = await getDebtCustomers();
         if (res?.success && Array.isArray(res.data)) {
-          setRows(res.data.filter((r) => !isGuestCustomer(r.tenKhach)));
+          setRows(res.data.filter(shouldShowGuestDebtRow));
         } else {
           setRows([]);
           if (res?.message) toast.error(res.message);
@@ -580,7 +589,7 @@ export default function DebtPage() {
     const q = foldText(query);
     const isSup = activeTab === "suppliers";
     return rows.filter((r) => {
-      if (!isSup && isGuestCustomer(r.tenKhach)) return false;
+      if (!isSup && !shouldShowGuestDebtRow(r)) return false;
       if (
         statusFilter !== "ALL" &&
         foldText(r.trangThai) !== foldText(statusFilter)
