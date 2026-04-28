@@ -1,17 +1,17 @@
-import { useState, useEffect } from "react"
-import { login, call } from "../api/index.js"
-import { getNextOrderFormDefaults } from "../api"
-import brandLogo from "../assets/logo-dulia.jpg"
+import { useState, useEffect } from "react";
+import { login, call } from "../api/index.js";
+import { getNextOrderFormDefaults } from "../api/index.js";
+import brandLogo from "../assets/logo-dulia.jpg";
 
-const ORDER_DEFAULTS_CACHE_KEY = "soanhang.orderDefaults"
-const BRAND_LOGO_URL = brandLogo
+const ORDER_DEFAULTS_CACHE_KEY = "soanhang.orderDefaults";
+const BRAND_LOGO_URL = brandLogo;
 
 const prefetchOrderDefaults = async () => {
   try {
-    const res = await getNextOrderFormDefaults()
-    const maPhieu = String(res?.data?.maPhieu || "").trim()
-    const ngayBan = String(res?.data?.ngayBan || "").trim()
-    if (!maPhieu || !ngayBan) return
+    const res = await getNextOrderFormDefaults();
+    const maPhieu = String(res?.data?.maPhieu || "").trim();
+    const ngayBan = String(res?.data?.ngayBan || "").trim();
+    if (!maPhieu || !ngayBan) return;
     sessionStorage.setItem(
       ORDER_DEFAULTS_CACHE_KEY,
       JSON.stringify({
@@ -19,64 +19,64 @@ const prefetchOrderDefaults = async () => {
         ngayBan,
         updatedAt: Date.now(),
       }),
-    )
+    );
   } catch (e) {
     // noop
   }
-}
+};
 
 export default function LoginPage({
   onLoginSuccess,
   appMode = "web",
   onChangeAppMode = () => {},
 }) {
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-  const [showPass, setShowPass] = useState(false)
-  const [demoAccounts, setDemoAccounts] = useState([])
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [demoAccounts, setDemoAccounts] = useState([]);
 
   useEffect(() => {
     call("getDemoAccounts")
       .then((res) => {
         if (res?.success && Array.isArray(res.data)) {
-          setDemoAccounts(res.data)
+          setDemoAccounts(res.data);
         }
       })
-      .catch(console.error)
-  }, [])
+      .catch(console.error);
+  }, []);
 
   const handleLogin = async (e) => {
-    e.preventDefault()
+    e.preventDefault();
 
     if (!email || !password) {
-      setError("Vui lòng điền đầy đủ thông tin")
-      return
+      setError("Vui lòng điền đầy đủ thông tin");
+      return;
     }
 
-    setError("")
-    setLoading(true)
+    setError("");
+    setLoading(true);
     try {
-      const res = await login(email, password)
+      const res = await login(email, password);
       if (res.success) {
-        prefetchOrderDefaults()
-        onLoginSuccess(res.data)
+        prefetchOrderDefaults();
+        onLoginSuccess(res.data);
       } else {
-        setError(res.message)
+        setError(res.message);
       }
     } catch (err) {
-      setError("Có lỗi xảy ra: " + (err?.message || String(err)))
+      setError("Có lỗi xảy ra: " + (err?.message || String(err)));
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const fillDemo = (acc) => {
-    setEmail(acc.email)
-    setPassword(acc.password)
-    setError("")
-  }
+    setEmail(acc.email);
+    setPassword(acc.password);
+    setError("");
+  };
 
   return (
     <div className="min-h-screen flex items-start md:items-center justify-center p-4 md:p-6 pb-20 bg-slate-100 font-sans text-slate-800">
@@ -89,8 +89,12 @@ export default function LoginPage({
             loading="eager"
             fetchpriority="high"
           />
-          <h1 className="text-3xl font-bold bg-gradient-to-br from-rose-700 to-rose-900 bg-clip-text text-transparent">DULI Accounting</h1>
-          <p className="text-sm mt-1 text-slate-500">Hệ thống dành riêng cho bạn</p>
+          <h1 className="text-3xl font-bold bg-gradient-to-br from-rose-700 to-rose-900 bg-clip-text text-transparent">
+            DULI Accounting
+          </h1>
+          <p className="text-sm mt-1 text-slate-500">
+            Hệ thống dành riêng cho bạn
+          </p>
           <div className="mt-3 flex items-center justify-center gap-2">
             <button
               type="button"
@@ -108,7 +112,9 @@ export default function LoginPage({
 
         <form onSubmit={handleLogin} className="flex flex-col gap-5">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Tài khoản</label>
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              Tài khoản
+            </label>
             <div className="relative flex items-center">
               <span className="absolute left-3 text-sm text-slate-400">✉️</span>
               <input
@@ -124,7 +130,9 @@ export default function LoginPage({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Mật khẩu</label>
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              Mật khẩu
+            </label>
             <div className="relative flex items-center">
               <span className="absolute left-3 text-sm text-slate-400">🔒</span>
               <input
@@ -156,19 +164,23 @@ export default function LoginPage({
             disabled={loading}
             className="mt-2 py-3.5 rounded-lg text-white font-semibold text-base flex items-center justify-center gap-2 transition-all disabled:opacity-70 disabled:cursor-not-allowed bg-gradient-to-br from-rose-700 to-rose-900 hover:shadow-lg hover:shadow-rose-700/30 hover:-translate-y-0.5 active:translate-y-0"
           >
-            {loading && <span className="spinner border-t-transparent w-4 h-4 border-2" />}
+            {loading && (
+              <span className="spinner border-t-transparent w-4 h-4 border-2" />
+            )}
             {loading ? "Đang đăng nhập..." : "Đăng nhập"}
           </button>
         </form>
 
         {demoAccounts.length > 0 && (
           <div className="mt-8 pt-6 text-center border-t border-slate-200">
-            <p className="text-xs font-medium mb-3 text-slate-400 uppercase tracking-wider">Tài khoản demo</p>
+            <p className="text-xs font-medium mb-3 text-slate-400 uppercase tracking-wider">
+              Tài khoản demo
+            </p>
             <div className="flex flex-wrap gap-2.5 justify-center">
               {demoAccounts.map((acc, i) => {
-                let icon = "👤"
-                if (acc.role === "admin") icon = "🧑‍💼"
-                else if (acc.role === "dev") icon = "🛠️"
+                let icon = "👤";
+                if (acc.role === "admin") icon = "🧑‍💼";
+                else if (acc.role === "dev") icon = "🛠️";
 
                 return (
                   <button
@@ -179,15 +191,12 @@ export default function LoginPage({
                   >
                     {icon} {acc.name || acc.role}
                   </button>
-                )
+                );
               })}
             </div>
           </div>
         )}
       </div>
     </div>
-  )
+  );
 }
-
-
-

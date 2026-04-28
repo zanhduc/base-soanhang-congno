@@ -6,7 +6,6 @@ import HistoryPage from "./pages/history";
 import ReceiptPage from "./pages/receipt";
 import ProductsPage from "./pages/products";
 import InventoryPage from "./pages/inventory";
-import StockPage from "./pages/stock";
 import DebtPage from "./pages/debt";
 import StatsPage from "./pages/stats";
 import PrintDiagnosticPage from "./pages/print-diagnostic";
@@ -374,8 +373,6 @@ function AppContent() {
           return <ProductsPage user={user} appMode={appMode} />;
         case "inventory":
           return <InventoryPage user={user} appMode={appMode} />;
-        case "stock":
-          return <StockPage user={user} appMode={appMode} />;
         case "debt":
           return <DebtPage user={user} appMode={appMode} />;
         case "stats":

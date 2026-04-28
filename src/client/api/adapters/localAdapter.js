@@ -1145,36 +1145,7 @@ const createInventoryReceipt = async (payload) => {
         });
       }
 
-      // Tìm sản phẩm lẻ trong catalog để cập nhật tồn lẻ và giá vốn lẻ
-      const prodIdx = MOCK_PRODUCTS.findIndex(
-        (mp) =>
-          foldText(mp.tenSanPham) === foldText(p.tenSanPham) &&
-          foldText(mp.donVi) === foldText(p.donViLe),
-      );
-
-      const quyDoi = Number(p.quyDoi || 1);
-      const slLeThem = Number(p.soLuong || 0) * quyDoi;
-      const giaVonLe = Number(p.giaNhapChan || 0) / quyDoi;
-
-      if (prodIdx >= 0) {
-        MOCK_PRODUCTS[prodIdx].tonKho =
-          (MOCK_PRODUCTS[prodIdx].tonKho || 0) + slLeThem;
-        MOCK_PRODUCTS[prodIdx].giaVon = giaVonLe;
-        MOCK_PRODUCTS[prodIdx].donViLon = p.donViChan;
-        MOCK_PRODUCTS[prodIdx].quyCach = quyDoi;
-      } else {
-        // Tự tạo mới nếu chưa có (như logic syncProductCatalog_ của GAS)
-        MOCK_PRODUCTS.push({
-          tenSanPham: p.tenSanPham,
-          nhomHang: p.nhomHang,
-          donVi: p.donViLe,
-          donGiaBan: 0,
-          giaVon: giaVonLe,
-          donViLon: p.donViChan,
-          quyCach: quyDoi,
-          tonKho: slLeThem,
-        });
-      }
+      // Bản nguyên liệu: không cập nhật tồn kho và không đồng bộ sang danh mục sản phẩm.
     });
   }
 
@@ -1279,14 +1250,10 @@ const createReceiptPdf = async (maPhieu) => {
 
 const getInventory = async () => {
   await sleep(150);
-  // Merge MOCK_PRODUCTS with some random tonKho for testing
   return {
     success: true,
-    data: MOCK_PRODUCTS.map((p) => ({
-      ...p,
-      tonKho:
-        p.tonKho !== undefined ? p.tonKho : Math.floor(Math.random() * 50) + 10,
-    })),
+    data: [],
+    message: "Tính năng tồn kho đã tắt trong bản nguyên liệu. (Mock)",
   };
 };
 

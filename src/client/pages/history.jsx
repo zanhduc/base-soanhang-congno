@@ -1492,22 +1492,10 @@ export default function HistoryPage() {
   const [receipts, setReceipts] = useState([]);
   const [revenuePeriodType, setRevenuePeriodType] = useState("all");
   const [revenuePeriodValue, setRevenuePeriodValue] = useState("current");
-  const [showInventory, setShowInventory] = useState(() => {
-    return localStorage.getItem("enable_inventory") === "true";
+  const [receiptMonthValue, setReceiptMonthValue] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
   });
-
-  useEffect(() => {
-    const handleSettingChange = (e) => {
-      setShowInventory(e.detail);
-      if (!e.detail) setActiveTab("orders");
-    };
-    window.addEventListener("inventory_setting_changed", handleSettingChange);
-    return () =>
-      window.removeEventListener(
-        "inventory_setting_changed",
-        handleSettingChange,
-      );
-  }, []);
   const [productCatalog, setProductCatalog] = useState([]);
   const [customerCatalog, setCustomerCatalog] = useState([]);
   const [bankConfig, setBankConfig] = useState(() => readCachedBankConfig());
@@ -1868,6 +1856,46 @@ export default function HistoryPage() {
     [periodFilteredOrders, activeTab],
   );
 
+  const receiptMonthOptions = useMemo(() => {
+    const months = new Set();
+    const now = new Date();
+    for (let i = 0; i < 12; i += 1) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.add(`${d.getFullYear()}-${pad2(d.getMonth() + 1)}`);
+    }
+    receipts.forEach((r) => {
+      const iso = toIsoDate(r.ngayNhap);
+      if (!iso) return;
+      months.add(iso.slice(0, 7));
+    });
+    return Array.from(months)
+      .sort((a, b) => (a < b ? 1 : -1))
+      .map((value) => {
+        const [y, m] = value.split("-");
+        return { value, label: `Tháng ${Number(m)}/${y}` };
+      });
+  }, [receipts]);
+
+  const receiptMonthlyStats = useMemo(() => {
+    if (activeTab !== "receipts") return null;
+    const [y, m] = String(receiptMonthValue || "").split("-");
+    if (!y || !m) return { totalAmount: 0, receiptCount: 0, supplierCount: 0 };
+    const monthKey = `${y}-${m}`;
+    const rows = filteredOrders.filter((item) => {
+      const iso = toIsoDate(item.ngayNhap);
+      return iso && iso.slice(0, 7) === monthKey;
+    });
+    const totalAmount = rows.reduce((sum, r) => sum + toNum(r.tongTienPhieu), 0);
+    const supplierCount = new Set(
+      rows.map((r) => foldText(r.nhaCungCap || "")).filter(Boolean),
+    ).size;
+    return {
+      totalAmount,
+      receiptCount: rows.length,
+      supplierCount,
+    };
+  }, [activeTab, filteredOrders, receiptMonthValue]);
+
   const resetFilters = () => {
     setFilters({
       fromDate: "",
@@ -2078,24 +2106,22 @@ export default function HistoryPage() {
               phiếu và sản phẩm.
             </p>
           </div>
-          {showInventory && (
-            <div className="flex bg-slate-200/50 p-1 rounded-xl w-full md:w-auto mt-2 md:mt-0">
-              <button
-                type="button"
-                onClick={() => setActiveTab("orders")}
-                className={`flex-1 md:w-32 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === "orders" ? "bg-white text-rose-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
-              >
-                Bán hàng
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab("receipts")}
-                className={`flex-1 md:w-32 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === "receipts" ? "bg-white text-rose-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
-              >
-                Nhập kho
-              </button>
-            </div>
-          )}
+          <div className="flex bg-slate-200/50 p-1 rounded-xl w-full md:w-auto mt-2 md:mt-0">
+            <button
+              type="button"
+              onClick={() => setActiveTab("orders")}
+              className={`flex-1 md:w-32 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === "orders" ? "bg-white text-rose-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+            >
+              Bán hàng
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("receipts")}
+              className={`flex-1 md:w-32 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === "receipts" ? "bg-white text-rose-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+            >
+              Nhập nguyên liệu
+            </button>
+          </div>
         </div>
 
         {activeTab === "orders" && (
@@ -2142,6 +2168,49 @@ export default function HistoryPage() {
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
                   Chưa trừ chi phí khác
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === "receipts" && receiptMonthlyStats && (
+          <section className="mb-4">
+            <div className="mb-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <h2 className="text-sm font-bold text-slate-800">
+                Chi phí nhập theo tháng
+              </h2>
+              <div className="flex items-center gap-2 self-start md:self-auto">
+                <CustomDropdown
+                  value={receiptMonthValue}
+                  onChange={setReceiptMonthValue}
+                  options={receiptMonthOptions}
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                  Tổng tiền nhập
+                </p>
+                <p className="mt-1 text-2xl font-black text-emerald-700">
+                  {fmt(receiptMonthlyStats.totalAmount)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Số phiếu nhập
+                </p>
+                <p className="mt-1 text-2xl font-black text-slate-800">
+                  {receiptMonthlyStats.receiptCount}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Số nhà cung cấp
+                </p>
+                <p className="mt-1 text-2xl font-black text-slate-800">
+                  {receiptMonthlyStats.supplierCount}
                 </p>
               </div>
             </div>

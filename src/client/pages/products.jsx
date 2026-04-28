@@ -244,20 +244,6 @@ export default function ProductsPage() {
     if (openId === id) setOpenId("");
   };
 
-  const [showInventory, setShowInventory] = useState(
-    () => localStorage.getItem("enable_inventory") === "true",
-  );
-
-  useEffect(() => {
-    const handleSettingChange = (e) => setShowInventory(e.detail);
-    window.addEventListener("inventory_setting_changed", handleSettingChange);
-    return () =>
-      window.removeEventListener(
-        "inventory_setting_changed",
-        handleSettingChange,
-      );
-  }, []);
-
   const validateRow = (row) => {
     const tenSanPham = String(row.tenSanPham || "").trim();
     const nhomHang = String(row.nhomHang || "").trim();
@@ -514,13 +500,6 @@ export default function ProductsPage() {
                       <p className="text-xs text-slate-500 truncate leading-tight">
                         {row.nhomHang ? `${row.nhomHang} • ` : ""}
                         {row.donVi || "-"}
-                        {showInventory && row.tonKho !== undefined && (
-                          <span
-                            className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold ${toNum(row.tonKho) <= 0 ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-600"}`}
-                          >
-                            Tồn: {row.tonKho}
-                          </span>
-                        )}
                       </p>
                     </div>
                     <div className="text-right flex-shrink-0">

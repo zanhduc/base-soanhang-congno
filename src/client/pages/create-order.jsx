@@ -161,8 +161,6 @@ const normalizeDraftProducts = (items) => {
       soLuong: Math.max(1, Number(p?.soLuong || 1)),
       donGiaBan: Math.max(0, Number(p?.donGiaBan || 0)),
       giaVon: Math.max(0, Number(p?.giaVon || 0)),
-      tonKhoMax:
-        p?.tonKhoMax === undefined ? undefined : Number(p.tonKhoMax || 0),
     }))
     .filter((p) => p.tenSanPham);
 };
@@ -445,10 +443,8 @@ function ProductListItem({
               onChange={(e) => {
                 const val =
                   e.target.value === "" ? "" : parseInt(e.target.value, 10) || 0;
-                const maxVal =
-                  product.tonKhoMax !== undefined ? product.tonKhoMax : 100000;
                 onUpdate({
-                  soLuong: val === "" ? "" : Math.min(val, maxVal),
+                  soLuong: val === "" ? "" : Math.min(val, 100000),
                 });
               }}
               onBlur={() => {
@@ -958,7 +954,6 @@ export default function CreateOrderPage({ appMode = "web" }) {
       soLuong: Number(p.soLuong || 0),
       donGiaBan: Number(p.donGiaBan || 0),
       giaVon: Number(p.giaVon || 0),
-      tonKhoMax: p.tonKhoMax,
     })),
     newProduct: {
       tenSanPham: newProduct.tenSanPham,
@@ -1129,24 +1124,15 @@ export default function CreateOrderPage({ appMode = "web" }) {
     ensureBankConfig({ force: !!cachedBank, silent: true });
   }, []);
 
-  const [showInventory, setShowInventory] = useState(
-    () => localStorage.getItem("enable_inventory") === "true",
-  );
   const [showImages, setShowImages] = useState(
     () => localStorage.getItem("show_product_images") !== "false",
   );
 
   useEffect(() => {
-    const handleSettingChange = (e) => setShowInventory(e.detail);
-    window.addEventListener("inventory_setting_changed", handleSettingChange);
     const handleImageChange = () =>
       setShowImages(localStorage.getItem("show_product_images") !== "false");
     window.addEventListener("storage", handleImageChange);
     return () => {
-      window.removeEventListener(
-        "inventory_setting_changed",
-        handleSettingChange,
-      );
       window.removeEventListener("storage", handleImageChange);
     };
   }, []);
@@ -1201,40 +1187,17 @@ export default function CreateOrderPage({ appMode = "web" }) {
     if (!normalizedProduct.tenSanPham?.trim())
       newErr.new_tenSanPham = "Chưa chọn hàng";
 
-    let maxInventory = undefined;
-    if (showInventory) {
-      const matched = getCatalogMatch(normalizedProduct.tenSanPham);
-      if (matched) {
-        const inputDonVi = String(normalizedProduct.donVi || "").trim();
-        const units = [
-          matched.donVi,
-          matched.donViLon,
-          matched.donViNho, // extra check
-        ].filter(Boolean);
-
-        const found = units.find(
-          (u) => u.toLowerCase() === inputDonVi.toLowerCase(),
-        );
-
-        if (found) {
-          normalizedProduct.donVi = found; // Smart formatting: lấy đúng format trong danh mục
-
-          const exactMatch = productCatalog.find(
-            (p) =>
-              foldText(p.tenSanPham) ===
-                foldText(normalizedProduct.tenSanPham) &&
-              foldText(p.donVi) === foldText(found),
-          );
-
-          if (exactMatch && exactMatch.tonKho !== undefined) {
-            maxInventory = exactMatch.tonKho;
-            if (normalizedProduct.soLuong > maxInventory) {
-              newErr.new_soLuong = `Kho chỉ còn ${maxInventory} ${found}`;
-            }
-          }
-        } else {
-          newErr.new_donVi = `Đơn vị phải là: ${[...new Set(units)].join(" hoặc ")}`;
-        }
+    const matched = getCatalogMatch(normalizedProduct.tenSanPham);
+    if (matched) {
+      const inputDonVi = String(normalizedProduct.donVi || "").trim();
+      const units = [matched.donVi, matched.donViLon, matched.donViNho].filter(
+        Boolean,
+      );
+      const found = units.find((u) => u.toLowerCase() === inputDonVi.toLowerCase());
+      if (found) {
+        normalizedProduct.donVi = found;
+      } else {
+        newErr.new_donVi = `Đơn vị phải là: ${[...new Set(units)].join(" hoặc ")}`;
       }
     }
 
@@ -1271,7 +1234,6 @@ export default function CreateOrderPage({ appMode = "web" }) {
       ...products,
       {
         ...normalizedProduct,
-        tonKhoMax: maxInventory,
         id: Date.now().toString(),
       },
     ]);
@@ -1349,10 +1311,6 @@ export default function CreateOrderPage({ appMode = "web" }) {
       soLuong: 1,
       donGiaBan: Math.max(0, Number(item.displayPrice ?? item.donGiaBan ?? 0)),
       giaVon: Math.max(0, Number(item.displayCost ?? item.giaVon ?? 0)),
-      tonKhoMax:
-        item.tonKho === undefined || item.tonKho === null
-          ? undefined
-          : Number(item.tonKho),
     };
 
     setProducts((prev) => [...prev, baseItem]);
@@ -1987,8 +1945,6 @@ export default function CreateOrderPage({ appMode = "web" }) {
                                   <p className="text-xs text-slate-500 mt-1">
                                     {p.nhomHang || "-"} • {p.displayUnit || "-"}{" "}
                                     • Giá {fmt(p.displayPrice || 0)}
-                                    {showInventory &&
-                                      ` • Tồn: ${p.tonKho || 0} ${p.displayUnit}`}
                                   </p>
                                 </button>
                               ),
@@ -2068,7 +2024,7 @@ export default function CreateOrderPage({ appMode = "web" }) {
                             );
                             setNewProduct((prev) => {
                               const inputVal = String(prev.donVi || "").trim();
-                              if (showInventory && matched) {
+                              if (matched) {
                                 const found = [
                                   matched.donVi,
                                   matched.donViLon,
@@ -2098,7 +2054,6 @@ export default function CreateOrderPage({ appMode = "web" }) {
                         )}
 
                         {showUnitSuggestions &&
-                          showInventory &&
                           getCatalogMatch(newProduct.tenSanPham) && (
                             <div className="absolute top-full left-0 right-0 z-[60] mt-2 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
                               <div className="p-2 space-y-1">

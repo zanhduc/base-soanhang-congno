@@ -1,3 +1,4 @@
+// Deprecated in GAS-lengocgato material mode: stock route/menu are disabled.
 import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { getInventory } from "../api";
