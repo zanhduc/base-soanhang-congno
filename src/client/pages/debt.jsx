@@ -559,7 +559,9 @@ export default function DebtPage() {
         setCustomerCatalog(cusRes.data);
       if (supRes?.success && Array.isArray(supRes.data))
         setSupplierCatalog(supRes.data);
-    } catch (e) {}
+    } catch (e) {
+      console.warn("Không tải được catalog khách/NCC:", e);
+    }
   };
 
   const checkInventorySetting = async () => {
@@ -568,7 +570,9 @@ export default function DebtPage() {
       if (res?.success) {
         setShowSupplierTab(res.data === "true");
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn("Không đọc được setting enable_inventory:", e);
+    }
   };
 
   useEffect(() => {

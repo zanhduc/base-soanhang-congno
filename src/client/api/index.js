@@ -4,7 +4,9 @@ import {
   createLocalFirstReader,
   createMutationWithInvalidation,
   clearCacheByKeys,
+  setMutationSuccessHook,
 } from "./localCache.js";
+import { publishRealtimeMutationSignal } from "../realtime/firebaseSync.js";
 
 const adapter = import.meta.env.DEV ? localAdapter : gasAdapter;
 
@@ -40,12 +42,31 @@ const BG_SPARSE_60M = {
   refreshCooldownMs: 60 * 60 * 1000,
 };
 
+const withRealtimeSignal = (fn, mutationName) => {
+  return async (...args) => {
+    const result = await fn(...args);
+    if (result?.success) {
+      publishRealtimeMutationSignal({ mutation: mutationName }).catch(() => {
+        // Silent publish failure so mutation UX stays smooth.
+      });
+    }
+    return result;
+  };
+};
+
+setMutationSuccessHook(({ mutationName }) => {
+  return publishRealtimeMutationSignal({ mutation: mutationName });
+});
+
 export const call = adapter.call;
 export const helloServer = adapter.helloServer;
 export const login = adapter.login;
 export const getUserInfo = adapter.getUserInfo;
 export const getDemoAccounts = adapter.getDemoAccounts;
 export const getGlobalNotice = adapter.getGlobalNotice;
+export const getSyncVersion =
+  adapter.getSyncVersion ||
+  (async () => ({ success: true, data: { version: "1" } }));
 export const getNextOrderFormDefaults = adapter.getNextOrderFormDefaults;
 export const getNextInventoryReceiptDefaults =
   adapter.getNextInventoryReceiptDefaults;
@@ -61,15 +82,27 @@ export const getBankConfig = createLocalFirstReader(
 );
 export const updateProductCatalogItem = createMutationWithInvalidation(
   adapter.updateProductCatalogItem,
-  [CACHE_KEYS.productCatalog, CACHE_KEYS.inventory],
+  [
+    CACHE_KEYS.productCatalog,
+    CACHE_KEYS.inventory,
+    CACHE_KEYS.inventorySuggestions,
+  ],
 );
 export const createProductCatalogItem = createMutationWithInvalidation(
   adapter.createProductCatalogItem,
-  [CACHE_KEYS.productCatalog, CACHE_KEYS.inventory],
+  [
+    CACHE_KEYS.productCatalog,
+    CACHE_KEYS.inventory,
+    CACHE_KEYS.inventorySuggestions,
+  ],
 );
 export const deleteProductCatalogItem = createMutationWithInvalidation(
   adapter.deleteProductCatalogItem,
-  [CACHE_KEYS.productCatalog, CACHE_KEYS.inventory],
+  [
+    CACHE_KEYS.productCatalog,
+    CACHE_KEYS.inventory,
+    CACHE_KEYS.inventorySuggestions,
+  ],
 );
 export const getCustomerCatalog = createLocalFirstReader(
   CACHE_KEYS.customerCatalog,
@@ -88,7 +121,11 @@ export const getDebtCustomers = createLocalFirstReader(
 );
 export const updateDebtCustomer = createMutationWithInvalidation(
   adapter.updateDebtCustomer,
-  [CACHE_KEYS.debtCustomers, CACHE_KEYS.orderHistory],
+  [
+    CACHE_KEYS.debtCustomers,
+    CACHE_KEYS.orderHistory,
+    CACHE_KEYS.customerCatalog,
+  ],
 );
 export const settleAllDebtCustomers = createMutationWithInvalidation(
   adapter.settleAllDebtCustomers,
@@ -104,10 +141,20 @@ export const createOrder = createMutationWithInvalidation(adapter.createOrder, [
   CACHE_KEYS.orderHistory,
   CACHE_KEYS.inventory,
   CACHE_KEYS.debtCustomers,
+  CACHE_KEYS.productCatalog,
+  CACHE_KEYS.inventorySuggestions,
+  CACHE_KEYS.customerCatalog,
 ]);
 export const createInventoryReceipt = createMutationWithInvalidation(
   adapter.createInventoryReceipt,
-  [CACHE_KEYS.inventory, CACHE_KEYS.receiptHistory, CACHE_KEYS.supplierDebts],
+  [
+    CACHE_KEYS.inventory,
+    CACHE_KEYS.receiptHistory,
+    CACHE_KEYS.supplierDebts,
+    CACHE_KEYS.supplierCatalog,
+    CACHE_KEYS.productCatalog,
+    CACHE_KEYS.inventorySuggestions,
+  ],
 );
 export const getInventorySuggestions = createLocalFirstReader(
   CACHE_KEYS.inventorySuggestions,
@@ -118,11 +165,15 @@ export const updateOrder = createMutationWithInvalidation(adapter.updateOrder, [
   CACHE_KEYS.orderHistory,
   CACHE_KEYS.inventory,
   CACHE_KEYS.debtCustomers,
+  CACHE_KEYS.productCatalog,
+  CACHE_KEYS.inventorySuggestions,
+  CACHE_KEYS.customerCatalog,
 ]);
 export const deleteOrder = createMutationWithInvalidation(adapter.deleteOrder, [
   CACHE_KEYS.orderHistory,
   CACHE_KEYS.inventory,
   CACHE_KEYS.debtCustomers,
+  CACHE_KEYS.customerCatalog,
 ]);
 export const getInventory = createLocalFirstReader(
   CACHE_KEYS.inventory,
@@ -135,7 +186,10 @@ export const getReceiptHistory = createLocalFirstReader(
   BG_SPARSE_15M,
 );
 export const getAppSetting = adapter.getAppSetting;
-export const setAppSetting = adapter.setAppSetting;
+export const setAppSetting = withRealtimeSignal(
+  adapter.setAppSetting,
+  "setAppSetting",
+);
 export const getSupplierDebts = createLocalFirstReader(
   CACHE_KEYS.supplierDebts,
   adapter.getSupplierDebts,
@@ -143,13 +197,22 @@ export const getSupplierDebts = createLocalFirstReader(
 );
 export const updateSupplierDebt = createMutationWithInvalidation(
   adapter.updateSupplierDebt,
-  [CACHE_KEYS.supplierDebts],
+  [CACHE_KEYS.supplierDebts, CACHE_KEYS.supplierCatalog],
 );
 export const formatAllSheets = adapter.formatAllSheets;
 export const uploadImageToImgBB = adapter.uploadImageToImgBB;
-export const issueEasyInvoice = adapter.issueEasyInvoice;
-export const cancelEasyInvoice = adapter.cancelEasyInvoice;
-export const replaceEasyInvoice = adapter.replaceEasyInvoice;
+export const issueEasyInvoice = withRealtimeSignal(
+  adapter.issueEasyInvoice,
+  "issueEasyInvoice",
+);
+export const cancelEasyInvoice = withRealtimeSignal(
+  adapter.cancelEasyInvoice,
+  "cancelEasyInvoice",
+);
+export const replaceEasyInvoice = withRealtimeSignal(
+  adapter.replaceEasyInvoice,
+  "replaceEasyInvoice",
+);
 export const downloadInvoicePDF = adapter.downloadInvoicePDF;
 export const logAction = adapter.logAction;
 export const clearAllReadCache = () => {

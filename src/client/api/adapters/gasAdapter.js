@@ -94,6 +94,15 @@ function getAppCacheVersion_() {
   return String(raw);
 }
 
+function getSyncVersion() {
+  return {
+    success: true,
+    data: {
+      version: String(getAppCacheVersion_()),
+    },
+  };
+}
+
 function bumpAppCacheVersion_() {
   var props = PropertiesService.getScriptProperties();
   var next = String((Number(getAppCacheVersion_()) || 1) + 1);
@@ -698,6 +707,7 @@ function syncProductCatalog_(ss, products) {
 
   var keys = Object.keys(incomingByKey);
   var inserts = [];
+  var newProductsForKho = [];
   var updated = 0;
 
   for (var k = 0; k < keys.length; k++) {
@@ -787,6 +797,7 @@ function syncProductCatalog_(ss, products) {
         incomingProduct.donGiaBan || 0,
         incomingProduct.giaVon || 0,
       ]);
+      newProductsForKho.push(incomingProduct);
     }
   }
 
@@ -825,40 +836,81 @@ function syncProductCatalog_(ss, products) {
       ) === "true";
     var sheetKho =
       ss.getSheetByName("QUAN_LY_KHO") || ss.getSheetByName("QUẢN LÝ KHO");
-    if (isInventoryEnabled && sheetKho) {
-      var khoInserts = [];
-      var khoMap = {};
-      for (var i = 0; i < inserts.length; i++) {
-        var r = inserts[i];
-        var existKho = findKhoRowByName_(sheetKho, 3, r[0]);
-        if (!existKho) {
-          var isLe = r[3] !== r[6];
-          if (!khoMap[r[0]]) {
-            // B:I = Tên(B), Nhóm(C), Đơn Vị Chẵn(D), Giá Vốn Chẵn(E), Quy Đổi(F), Đơn Vị Lẻ(G), Giá Vốn Lẻ(H), Tồn Kho Lẻ(I)
-            var dvLe = isLe ? r[3] : "";
-            var gvLe = r[7] > 0 ? r[5] / r[7] : r[5];
-            khoMap[r[0]] = [
-              r[0],
-              r[2],
-              r[6] || r[3],
-              r[5],
-              r[7] || 0,
-              dvLe,
-              gvLe,
-              0,
-            ];
-            khoInserts.push(khoMap[r[0]]);
-          } else {
-            // Đã có trong map (sp này có 2 dòng chẵn/lẻ được tạo mới cùng lúc)
-            if (isLe) {
-              khoMap[r[0]][5] = r[3]; // Ghi nhận đơn vị lẻ
-              khoMap[r[0]][6] = r[7] > 0 ? r[5] / r[7] : r[5]; // Cập nhật lại giá vốn lẻ
-            } else {
-              // Nếu dòng hiện tại là chẵn, cập nhật lại đơn vị/giá chẵn
-              khoMap[r[0]][2] = r[3];
-              khoMap[r[0]][3] = r[5];
-            }
+    if (isInventoryEnabled && sheetKho && newProductsForKho.length) {
+      var groupedByName = {};
+      for (var npIdx = 0; npIdx < newProductsForKho.length; npIdx++) {
+        var np = newProductsForKho[npIdx];
+        var nameKey = normalizeProductKeyPart_(np.tenSanPham);
+        if (!nameKey) continue;
+
+        if (!groupedByName[nameKey]) {
+          groupedByName[nameKey] = {
+            tenSanPham: np.tenSanPham,
+            nhomHang: np.nhomHang || "",
+            donViChan: "",
+            giaVonChan: 0,
+            quyDoi: 1,
+            donViLe: "",
+            giaVonLe: 0,
+          };
+        }
+
+        var entry = groupedByName[nameKey];
+        if (!entry.nhomHang && np.nhomHang) entry.nhomHang = np.nhomHang;
+
+        var unit = String(np.donVi || "").trim();
+        var unitLon = String(np.donViLon || unit).trim();
+        var unitKey = normalizeProductKeyPart_(unit);
+        var unitLonKey = normalizeProductKeyPart_(unitLon);
+        var quyDoi = Math.max(parseMoneyNumber_(np.quyCach), 1);
+        var giaVon = Math.max(parseMoneyNumber_(np.giaVon), 0);
+
+        if (!entry.donViChan) entry.donViChan = unitLon || unit;
+        if (quyDoi > 1) entry.quyDoi = quyDoi;
+
+        if (unit && unitLon && unitKey && unitLonKey && unitKey !== unitLonKey) {
+          entry.donViLe = unit;
+          if (giaVon > 0) entry.giaVonLe = giaVon;
+        } else {
+          if (!entry.donViChan) entry.donViChan = unit || unitLon;
+          if (giaVon > 0) entry.giaVonChan = giaVon;
+          if (!entry.donViLe && entry.quyDoi <= 1) {
+            entry.donViLe = entry.donViChan;
+            entry.giaVonLe = giaVon;
           }
+        }
+      }
+
+      var khoInserts = [];
+      var groupedKeys = Object.keys(groupedByName);
+      for (var gk = 0; gk < groupedKeys.length; gk++) {
+        var grouped = groupedByName[groupedKeys[gk]];
+        var existKho = findKhoRowByName_(sheetKho, 3, grouped.tenSanPham);
+        if (!existKho) {
+          var quyDoiFinal = Math.max(parseMoneyNumber_(grouped.quyDoi), 1);
+          var donViChanFinal = grouped.donViChan || grouped.donViLe || "";
+          var donViLeFinal = grouped.donViLe || donViChanFinal;
+          var giaVonChanFinal = Math.max(parseMoneyNumber_(grouped.giaVonChan), 0);
+          var giaVonLeFinal = Math.max(parseMoneyNumber_(grouped.giaVonLe), 0);
+
+          if (!giaVonChanFinal && giaVonLeFinal) {
+            giaVonChanFinal = giaVonLeFinal * quyDoiFinal;
+          }
+          if (!giaVonLeFinal && giaVonChanFinal) {
+            giaVonLeFinal =
+              quyDoiFinal > 0 ? giaVonChanFinal / quyDoiFinal : giaVonChanFinal;
+          }
+
+          khoInserts.push([
+            grouped.tenSanPham,
+            grouped.nhomHang || "",
+            donViChanFinal,
+            giaVonChanFinal,
+            quyDoiFinal,
+            donViLeFinal,
+            giaVonLeFinal,
+            0,
+          ]);
         }
       }
 
@@ -3256,7 +3308,11 @@ function enqueueOperation_(action, payload) {
   return targetRow;
 }
 
-function runWithLockOrQueue_(action, payload, fn) {
+function runWithLockOrQueue_(action, payload, fn, options) {
+  options = options || {};
+  if (options.skipLock) {
+    return fn();
+  }
   var lock = LockService.getDocumentLock();
   var locked = false;
   try {
@@ -3347,6 +3403,12 @@ function dispatchQueueAction_(action, payload) {
     result = createInventoryReceiptInternal_(payload.payload);
   else if (action === "UPDATE_SUPPLIER_DEBT")
     result = updateSupplierDebtInternal_(payload.payload);
+  else if (action === "ISSUE_EASYINVOICE")
+    result = issueEasyInvoice(payload.payload, { skipLock: true });
+  else if (action === "CANCEL_EASYINVOICE")
+    result = cancelEasyInvoice(payload.payload, { skipLock: true });
+  else if (action === "REPLACE_EASYINVOICE")
+    result = replaceEasyInvoice(payload.payload, { skipLock: true });
   if (action === "SET_SETTING") {
     var props = PropertiesService.getScriptProperties();
     props.setProperty(payload.payload.key, String(payload.payload.value));
@@ -4013,7 +4075,7 @@ function uploadImageToImgBB(base64Data) {
 }
 
 /* EASYINVOICE INTEGRATION */
-function issueEasyInvoice(payload) {
+function issueEasyInvoice(payload, options) {
   return runWithLockOrQueue_(
     "ISSUE_EASYINVOICE",
     { payload: payload },
@@ -4140,10 +4202,11 @@ function issueEasyInvoice(payload) {
         return { success: false, message: e.message };
       }
     },
+    options,
   );
 }
 
-function cancelEasyInvoice(payload) {
+function cancelEasyInvoice(payload, options) {
   return runWithLockOrQueue_(
     "CANCEL_EASYINVOICE",
     { payload: payload },
@@ -4236,10 +4299,11 @@ function cancelEasyInvoice(payload) {
         return { success: false, message: e.message };
       }
     },
+    options,
   );
 }
 
-function replaceEasyInvoice(payload) {
+function replaceEasyInvoice(payload, options) {
   return runWithLockOrQueue_(
     "REPLACE_EASYINVOICE",
     { payload: payload },
@@ -4394,6 +4458,7 @@ function replaceEasyInvoice(payload) {
         return { success: false, message: e.message };
       }
     },
+    options,
   );
 }
 
@@ -4402,6 +4467,7 @@ const loginClient = (email, password) => call("login", email, password);
 const getUserInfoClient = (email) => call("getUserInfo", email);
 const getDemoAccountsClient = () => call("getDemoAccounts");
 const getGlobalNoticeClient = () => call("getGlobalNotice");
+const getSyncVersionClient = () => call("getSyncVersion");
 const getNextOrderFormDefaultsClient = () => call("getNextOrderFormDefaults");
 const issueEasyInvoiceClient = (payload) => call("issueEasyInvoice", payload);
 const cancelEasyInvoiceClient = (payload) => call("cancelEasyInvoice", payload);
@@ -4442,6 +4508,7 @@ export const gasAdapter = {
   getUserInfo: getUserInfoClient,
   getDemoAccounts: getDemoAccountsClient,
   getGlobalNotice: getGlobalNoticeClient,
+  getSyncVersion: getSyncVersionClient,
   getNextOrderFormDefaults: getNextOrderFormDefaultsClient,
   getNextInventoryReceiptDefaults: getNextInventoryReceiptDefaultsClient,
   getProductCatalog: getProductCatalogClient,

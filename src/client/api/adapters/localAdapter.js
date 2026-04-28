@@ -95,6 +95,8 @@ const MOCK_BANK_CONFIG = {
   accountName: "Nguyễn Anh Đức",
 };
 
+const LOCAL_SYNC_VERSION_KEY = "soanhang_local_sync_version";
+
 const MOCK_ORDER_HISTORY = [
   {
     maPhieu: "DH012",
@@ -1329,6 +1331,28 @@ const getAppSetting = async (key) => {
   return { success: true, data: val };
 };
 
+const readLocalSyncVersion = () => {
+  if (typeof window === "undefined" || !window.localStorage) return "1";
+  try {
+    const raw = window.localStorage.getItem(LOCAL_SYNC_VERSION_KEY);
+    if (raw) return String(raw);
+    window.localStorage.setItem(LOCAL_SYNC_VERSION_KEY, "1");
+  } catch (_) {
+    // Keep default when localStorage is unavailable.
+  }
+  return "1";
+};
+
+const getSyncVersion = async () => {
+  await sleep(80);
+  return {
+    success: true,
+    data: {
+      version: readLocalSyncVersion(),
+    },
+  };
+};
+
 const setAppSetting = async (payload) => {
   await sleep(150);
   if (!payload || !payload.key)
@@ -1369,6 +1393,7 @@ const call = async (fnName, ...args) => {
   if (fnName === "deleteOrder") return deleteOrder(args[0]);
   if (fnName === "getInventory") return getInventory();
   if (fnName === "getReceiptHistory") return getReceiptHistory();
+  if (fnName === "getSyncVersion") return getSyncVersion();
   if (fnName === "getAppSetting") return getAppSetting(args[0]);
   if (fnName === "setAppSetting") return setAppSetting(args[0]);
   if (fnName === "getInventorySuggestions") return getInventorySuggestions();
@@ -1607,6 +1632,7 @@ export const localAdapter = {
   deleteOrder,
   getInventory,
   getReceiptHistory,
+  getSyncVersion,
   getInventorySuggestions,
   getSupplierDebts,
   updateSupplierDebt,

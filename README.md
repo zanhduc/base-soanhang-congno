@@ -79,3 +79,49 @@ Project = Repository riêng
 Client = GAS project riêng  
 
 Không bao giờ dùng chung tài nguyên giữa các dự án.
+
+---
+
+# Realtime Multi-User (Firebase)
+
+Base đã hỗ trợ realtime đồng bộ nhiều máy theo kiểu signal:
+
+- Khi mutation API thành công (tạo/sửa/xóa), client ghi 1 signal lên Firestore.
+- Các máy khác đang mở cùng dự án nhận signal tức thì và tự clear cache + reload dữ liệu trang.
+- Listener realtime chỉ chạy khi tab đang `visible` để giảm chi phí reads.
+- Nếu Firebase chưa cấu hình hoặc auth/rules lỗi, app tự fallback về polling phiên bản cache như cũ.
+- Khi mở app lại sau thời gian offline, hệ thống tự so sánh signal gần nhất để bắt kịp thay đổi trước đó.
+
+## Setup nhanh
+
+1. Tạo project trên Firebase Console.
+2. Bật `Authentication` -> `Sign-in method` -> `Anonymous`.
+3. Bật `Firestore Database` (Native mode).
+4. Tạo Web App trong Firebase và copy config.
+5. Copy `.env.example` thành `.env`, điền:
+
+```bash
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_APP_ID=...
+VITE_REALTIME_PROJECT_KEY=
+```
+
+`VITE_REALTIME_PROJECT_KEY` có thể để trống, hệ thống tự derive từ `VITE_GAS_WEBAPP_URL`.
+Nếu cả 2 đều không có key hợp lệ, realtime sẽ tự tắt để tránh lẫn dữ liệu giữa dự án.
+
+## Firestore Rules khuyến nghị
+
+```txt
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /soanhang_sync_signals/{projectKey} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
+```
+
+Rule này yêu cầu user anonymous auth hợp lệ, tránh mở public gây phát sinh chi phí ngoài ý muốn.

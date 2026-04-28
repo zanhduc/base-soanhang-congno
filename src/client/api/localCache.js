@@ -2,6 +2,7 @@ const CACHE_PREFIX = "soanhang_api_cache_v1:";
 const AUTH_USER_STORAGE_KEY = "soanhang.auth.user";
 const inflightRefresh = new Map();
 const lastRefreshAt = new Map();
+let mutationSuccessHook = null;
 
 function canUseStorage() {
   return (
@@ -181,11 +182,26 @@ export function createLocalFirstReader(cacheKey, fn, options = {}) {
 }
 
 export function createMutationWithInvalidation(fn, invalidateKeys = []) {
+  const mutationName = String(fn?.name || "mutation");
   return async (...args) => {
     const result = await fn(...args);
     if (isSuccessResponse(result)) {
       clearCacheByKeys(invalidateKeys);
+      if (typeof mutationSuccessHook === "function") {
+        Promise.resolve(
+          mutationSuccessHook({
+            mutationName,
+            invalidateKeys: [...invalidateKeys],
+          }),
+        ).catch(() => {
+          // Silent hook failure so business flow is not blocked.
+        });
+      }
     }
     return result;
   };
+}
+
+export function setMutationSuccessHook(hook) {
+  mutationSuccessHook = typeof hook === "function" ? hook : null;
 }

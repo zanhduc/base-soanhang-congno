@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useHashRouter } from "./hooks/useHashRouter";
 import LoginPage from "./pages/login";
 import CreateOrderPage from "./pages/create-order";
@@ -20,6 +20,13 @@ import {
   readAppMode,
   writeAppMode,
 } from "./utils/appMode";
+import { clearAllReadCache, getSyncVersion } from "./api";
+import {
+  isRealtimeSyncEnabled,
+  startRealtimeSyncListener,
+} from "./realtime/firebaseSync";
+
+const REMOTE_SYNC_POLL_MS = 15000;
 
 const toBool = (value) => {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -103,6 +110,13 @@ function AppContent() {
   const [initDone, setInitDone] = useState(false);
   const [printParams, setPrintParams] = useState(null);
   const [appMode, setAppModeState] = useState(() => readAppMode());
+  const [syncNonce, setSyncNonce] = useState(0);
+  const [realtimeActive, setRealtimeActive] = useState(false);
+  const [isPageVisible, setIsPageVisible] = useState(() => {
+    if (typeof document === "undefined") return true;
+    return document.visibilityState === "visible";
+  });
+  const lastSyncVersionRef = useRef("");
   const isPosMode = appMode === "pos";
 
   const setAppMode = useCallback((nextMode) => {
@@ -124,6 +138,16 @@ function AppContent() {
     return () => {
       window.removeEventListener("hashchange", syncModeFromLocation);
       window.removeEventListener("popstate", syncModeFromLocation);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      setIsPageVisible(document.visibilityState === "visible");
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 
@@ -219,6 +243,91 @@ function AppContent() {
     };
   }, [user, isPosMode]);
 
+  useEffect(() => {
+    if (!user) {
+      lastSyncVersionRef.current = "";
+      setRealtimeActive(false);
+      return;
+    }
+
+    if (realtimeActive) return;
+
+    let disposed = false;
+
+    const pollVersion = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const res = await getSyncVersion();
+        if (disposed || !res?.success) return;
+        const nextVersion = String(res?.data?.version || "").trim();
+        if (!nextVersion) return;
+
+        const prevVersion = lastSyncVersionRef.current;
+        if (!prevVersion) {
+          lastSyncVersionRef.current = nextVersion;
+          return;
+        }
+
+        if (nextVersion !== prevVersion) {
+          lastSyncVersionRef.current = nextVersion;
+          clearAllReadCache();
+          setSyncNonce((v) => v + 1);
+        }
+      } catch (_) {
+        // Keep polling silent to avoid interrupting user flow.
+      }
+    };
+
+    pollVersion();
+    const timer = window.setInterval(pollVersion, REMOTE_SYNC_POLL_MS);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        pollVersion();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [user, realtimeActive]);
+
+  useEffect(() => {
+    if (!user) {
+      setRealtimeActive(false);
+      return;
+    }
+    if (!isPageVisible) {
+      setRealtimeActive(false);
+      return;
+    }
+    if (!isRealtimeSyncEnabled()) {
+      setRealtimeActive(false);
+      return;
+    }
+
+    const stopListening = startRealtimeSyncListener({
+      onReady: () => {
+        setRealtimeActive(true);
+      },
+      onError: () => {
+        setRealtimeActive(false);
+      },
+      onRemoteSignal: () => {
+        clearAllReadCache();
+        setSyncNonce((v) => v + 1);
+      },
+    });
+
+    return () => {
+      if (typeof stopListening === "function") {
+        stopListening();
+      }
+    };
+  }, [user, isPageVisible]);
+
   if (!initDone) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -281,7 +390,9 @@ function AppContent() {
     return (
       <div className={`min-h-screen ${isPosMode ? "bg-slate-100 pb-24" : "bg-slate-50"}`}>
         <GlobalNoticeBanner />
-        <div className={isPosMode ? "" : "md:pl-72"}>{renderPage()}</div>
+        <div key={`${currentPath}:${syncNonce}`} className={isPosMode ? "" : "md:pl-72"}>
+          {renderPage()}
+        </div>
         <FloatingMenu
           currentPath={currentPath}
           onNavigate={navigate}
