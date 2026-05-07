@@ -42,8 +42,11 @@ const openReceiptPage = async (order, size) => {
     return;
   }
   const isPdf = size === "pdf";
-  const preferredExecUrl = String(import.meta.env.VITE_GAS_WEBAPP_URL || "").trim();
-  const baseUrl = preferredExecUrl || `${window.location.origin}${window.location.pathname}`;
+  const preferredExecUrl = String(
+    import.meta.env.VITE_GAS_WEBAPP_URL || "",
+  ).trim();
+  const baseUrl =
+    preferredExecUrl || `${window.location.origin}${window.location.pathname}`;
   const sizeParam =
     size === "58" ? "58" : size === "80" ? "80" : size === "pdf" ? "pdf" : "";
 
@@ -145,7 +148,8 @@ function StatusBadge({ status }) {
   if (key === "PAID") cls = "bg-emerald-100 text-emerald-700";
   if (key === "PARTIAL") cls = "bg-violet-100 text-violet-700";
   if (key === "DEBT") cls = "bg-amber-100 text-amber-800";
-  if (key === "CANCELLED") cls = "bg-slate-200 text-slate-600 border border-slate-300";
+  if (key === "CANCELLED")
+    cls = "bg-slate-200 text-slate-600 border border-slate-300";
   return (
     <span
       className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${cls}`}
@@ -174,7 +178,9 @@ function HistoryCard({
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const isPartial = getStatusCode(order.trangThai) === "PARTIAL";
-  const isCancelled = order.statusText === "Đã hủy" || getStatusCode(order.trangThai) === "CANCELLED";
+  const isCancelled =
+    order.statusText === "Đã hủy" ||
+    getStatusCode(order.trangThai) === "CANCELLED";
 
   useEffect(() => {
     const onEsc = (e) => {
@@ -223,11 +229,17 @@ function HistoryCard({
   };
 
   return (
-    <article className={`rounded-2xl border ${isCancelled ? "border-slate-200 bg-slate-50/50 opacity-80 shadow-none" : "border-rose-200 bg-white shadow-sm"} p-4 md:p-5 transition-all`}>
+    <article
+      className={`rounded-2xl border ${isCancelled ? "border-slate-200 bg-slate-50/50 opacity-80 shadow-none" : "border-rose-200 bg-white shadow-sm"} p-4 md:p-5 transition-all`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs text-slate-500">Mã phiếu</p>
-          <h3 className={`text-lg font-bold ${isCancelled ? "text-slate-500 line-through" : "text-slate-900"}`}>{order.maPhieu}</h3>
+          <h3
+            className={`text-lg font-bold ${isCancelled ? "text-slate-500 line-through" : "text-slate-900"}`}
+          >
+            {order.maPhieu}
+          </h3>
           <p className="text-sm text-slate-500 mt-1">
             Ngày bán: {order.ngayBan || "-"}
           </p>
@@ -243,7 +255,9 @@ function HistoryCard({
             </p>
           )}
           <p className="text-xs text-slate-500 mt-2">Tổng hóa đơn</p>
-          <p className={`text-lg font-bold ${isCancelled ? "text-slate-400 line-through" : "text-rose-700"}`}>
+          <p
+            className={`text-lg font-bold ${isCancelled ? "text-slate-400 line-through" : "text-rose-700"}`}
+          >
             {fmt(order.tongHoaDon)}
           </p>
         </div>
@@ -353,7 +367,7 @@ function HistoryCard({
             >
               Sửa
             </button>
-            {order.invoiceNo ? (
+            {/* {order.invoiceNo ? (
               <button
                 type="button"
                 onClick={() => setInvoiceModalOpen(true)}
@@ -374,7 +388,7 @@ function HistoryCard({
               >
                 Hóa đơn ĐT
               </button>
-            )}
+            )} */}
             <button
               type="button"
               onClick={onDelete}
@@ -414,7 +428,8 @@ function HistoryCard({
                   </span>
                 </p>
                 <p className="text-xs text-slate-500">
-                  Mã tra cứu: {String(order.lookupCode || "").split("|IKEY:")[0]}
+                  Mã tra cứu:{" "}
+                  {String(order.lookupCode || "").split("|IKEY:")[0]}
                 </p>
                 <p className="text-xs text-slate-500">
                   Trạng thái:{" "}
@@ -434,9 +449,15 @@ function HistoryCard({
                 )}
               </div>
             ) : (
-              <div className={`bg-amber-50 p-3 rounded-xl border ${isCancelled ? "border-rose-200 bg-rose-50/50" : "border-amber-200"} mb-4`}>
-                <p className={`text-sm font-medium ${isCancelled ? "text-rose-700" : "text-amber-700"}`}>
-                  {isCancelled ? "Hóa đơn này đã bị Hủy. Bạn có thể Sửa đơn hàng và Phát hành hóa đơn mới bên dưới." : "Đơn hàng này chưa được xuất Hóa đơn điện tử."}
+              <div
+                className={`bg-amber-50 p-3 rounded-xl border ${isCancelled ? "border-rose-200 bg-rose-50/50" : "border-amber-200"} mb-4`}
+              >
+                <p
+                  className={`text-sm font-medium ${isCancelled ? "text-rose-700" : "text-amber-700"}`}
+                >
+                  {isCancelled
+                    ? "Hóa đơn này đã bị Hủy. Bạn có thể Sửa đơn hàng và Phát hành hóa đơn mới bên dưới."
+                    : "Đơn hàng này chưa được xuất Hóa đơn điện tử."}
                 </p>
               </div>
             )}
@@ -451,7 +472,11 @@ function HistoryCard({
                   disabled={issuing}
                   className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
                 >
-                  {issuing ? "Đang xuất..." : isCancelled ? "Phát hành lại HĐĐT mới" : "Tiến hành xuất HĐĐT"}
+                  {issuing
+                    ? "Đang xuất..."
+                    : isCancelled
+                      ? "Phát hành lại HĐĐT mới"
+                      : "Tiến hành xuất HĐĐT"}
                 </button>
               )}
               {order.invoiceNo && order.statusText !== "Đã hủy" && (
@@ -514,7 +539,8 @@ function HistoryCard({
                         const url = window.URL.createObjectURL(blob);
                         const a = document.createElement("a");
                         a.href = url;
-                        a.download = res.filename || `HoaDon_${order.maPhieu}.pdf`;
+                        a.download =
+                          res.filename || `HoaDon_${order.maPhieu}.pdf`;
                         document.body.appendChild(a);
                         a.click();
                         window.URL.revokeObjectURL(url);
@@ -1885,7 +1911,10 @@ export default function HistoryPage() {
       const iso = toIsoDate(item.ngayNhap);
       return iso && iso.slice(0, 7) === monthKey;
     });
-    const totalAmount = rows.reduce((sum, r) => sum + toNum(r.tongTienPhieu), 0);
+    const totalAmount = rows.reduce(
+      (sum, r) => sum + toNum(r.tongTienPhieu),
+      0,
+    );
     const supplierCount = new Set(
       rows.map((r) => foldText(r.nhaCungCap || "")).filter(Boolean),
     ).size;
