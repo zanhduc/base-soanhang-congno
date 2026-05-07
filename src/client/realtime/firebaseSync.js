@@ -12,6 +12,7 @@ const AUTH_USER_STORAGE_KEY = "soanhang.auth.user";
 const SESSION_STORAGE_KEY = "soanhang.realtime.session_id";
 const LAST_SIGNAL_STORAGE_PREFIX = "soanhang.realtime.last_signal:";
 const SIGNAL_COLLECTION = "soanhang_sync_signals";
+const SIGNAL_KEY_CARRY_WINDOW_MS = 20000;
 
 let singleton = null;
 
@@ -159,6 +160,7 @@ function getSingleton() {
       sessionId,
       signalRef: doc(db, SIGNAL_COLLECTION, projectKey),
       lastSeenSignalId: persistedLastSignalId,
+      recentInvalidateEntries: [],
     };
     return singleton;
   } catch (e) {
@@ -176,6 +178,34 @@ function buildSignalId(data) {
   const ts = Number(data?.updatedAtMs || 0);
   if (!nonce && !ts) return "";
   return `${nonce}:${ts}`;
+}
+
+function mergeRecentInvalidateKeys(state, keys = []) {
+  const now = Date.now();
+  const incoming = Array.isArray(keys)
+    ? keys.map((k) => String(k || "").trim()).filter(Boolean)
+    : [];
+  if (!state || !incoming.length) return incoming.slice(0, 30);
+
+  const prev = Array.isArray(state.recentInvalidateEntries)
+    ? state.recentInvalidateEntries
+    : [];
+  const alive = prev.filter(
+    (entry) =>
+      entry &&
+      typeof entry.key === "string" &&
+      entry.key &&
+      Number(entry.at || 0) > 0 &&
+      now - Number(entry.at) <= SIGNAL_KEY_CARRY_WINDOW_MS,
+  );
+
+  const next = [...alive];
+  incoming.forEach((key) => {
+    next.push({ key, at: now });
+  });
+
+  state.recentInvalidateEntries = next.slice(-120);
+  return Array.from(new Set(next.map((entry) => entry.key))).slice(0, 30);
 }
 
 export function isRealtimeSyncEnabled() {
@@ -199,6 +229,8 @@ export async function publishRealtimeMutationSignal(meta = {}) {
   const authOk = await ensureRealtimeAuth(state);
   if (!authOk) return { success: false, message: "realtime_auth_failed" };
 
+  const invalidateKeys = mergeRecentInvalidateKeys(state, meta.invalidateKeys);
+
   const now = Date.now();
   const signal = {
     nonce: `${now}-${Math.random().toString(36).slice(2, 10)}`,
@@ -209,6 +241,7 @@ export async function publishRealtimeMutationSignal(meta = {}) {
       .trim()
       .toLowerCase(),
     mutation: String(meta.mutation || "").trim().slice(0, 120),
+    invalidateKeys,
   };
 
   await setDoc(state.signalRef, signal, { merge: true });
@@ -254,6 +287,11 @@ export function startRealtimeSyncListener({ onRemoteSignal, onReady, onError }) 
             ) {
               onRemoteSignal({
                 mutation: String(data.mutation || ""),
+                invalidateKeys: Array.isArray(data.invalidateKeys)
+                  ? data.invalidateKeys
+                      .map((k) => String(k || "").trim())
+                      .filter(Boolean)
+                  : [],
                 actorEmail: String(data.actorEmail || ""),
                 updatedAtMs: Number(data.updatedAtMs || 0),
               });
@@ -268,6 +306,11 @@ export function startRealtimeSyncListener({ onRemoteSignal, onReady, onError }) 
 
           onRemoteSignal({
             mutation: String(data.mutation || ""),
+            invalidateKeys: Array.isArray(data.invalidateKeys)
+              ? data.invalidateKeys
+                  .map((k) => String(k || "").trim())
+                  .filter(Boolean)
+              : [],
             actorEmail: String(data.actorEmail || ""),
             updatedAtMs: Number(data.updatedAtMs || 0),
           });

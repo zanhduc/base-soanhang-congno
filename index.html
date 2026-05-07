@@ -16,6 +16,16 @@
     <title>Soạn Hàng - Công Nợ</title>
     <script>
       (function () {
+        // Fallback for edge cases where Vite preload helper is referenced
+        // but not injected in constrained runtimes (e.g. Apps Script iframe).
+        if (typeof globalThis.__VITE_PRELOAD__ !== "function") {
+          var __VITE_PRELOAD__ = function (baseModule) {
+            if (typeof baseModule === "function") return baseModule();
+            return Promise.resolve(baseModule);
+          };
+          globalThis.__VITE_PRELOAD__ = __VITE_PRELOAD__;
+        }
+
         // --- 1. SETTING LOGO CHÍNH ---
         // Đã chèn logo-dulia.jpg
         var iconUrl = "https://i.postimg.cc/wTf0f6Jn/logo-dulia.jpg";

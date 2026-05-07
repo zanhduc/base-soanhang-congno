@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 const UserContext = createContext(null)
 const USER_STORAGE_KEY = "soanhang.auth.user"
+export const DEVICE_TOKEN_SCOPE = "base-soanhang-congno"
+export const DEVICE_TOKEN_STORAGE_KEY = `soanhang.auth.device_token:${DEVICE_TOKEN_SCOPE}`
 const USER_TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
 
 const readStoredUser = () => {

@@ -62,6 +62,7 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: "dist",
       emptyOutDir: true,
+      modulePreload: false,
       cssCodeSplit: false,
       assetsInlineLimit: 100000000,
       minify: "esbuild",

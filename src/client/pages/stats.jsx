@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getOrderHistory } from "../api";
+import { CACHE_INVALIDATED_EVENT, CACHE_KEYS, getOrderHistory } from "../api";
 import toast from "react-hot-toast";
 import {
   formatMoney as fmt,
@@ -219,6 +219,22 @@ export default function StatsPage() {
   const [trendYear, setTrendYear] = useState(() => new Date().getFullYear());
   const [isDesktop, setIsDesktop] = useState(true);
   const [topProductsPeriod, setTopProductsPeriod] = useState("all");
+  const loadOrders = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
+    try {
+      const res = await getOrderHistory();
+      if (res?.success && Array.isArray(res.data)) setOrders(res.data);
+      else {
+        setOrders([]);
+        if (res?.message) toast.error(res.message);
+      }
+    } catch (e) {
+      setOrders([]);
+      toast.error("Không tải được dữ liệu thống kê");
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  };
 
   useEffect(() => {
     setIsDesktop(window.innerWidth >= 768);
@@ -228,23 +244,19 @@ export default function StatsPage() {
   }, []);
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const res = await getOrderHistory();
-        if (res?.success && Array.isArray(res.data)) setOrders(res.data);
-        else {
-          setOrders([]);
-          if (res?.message) toast.error(res.message);
-        }
-      } catch (e) {
-        setOrders([]);
-        toast.error("Không tải được dữ liệu thống kê");
-      } finally {
-        setLoading(false);
-      }
+    loadOrders();
+  }, []);
+
+  useEffect(() => {
+    const onInvalidated = (event) => {
+      const keys = event?.detail?.keys;
+      if (!Array.isArray(keys)) return;
+      if (!keys.includes(CACHE_KEYS.orderHistory)) return;
+      loadOrders({ silent: true });
     };
-    load();
+    window.addEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
+    return () =>
+      window.removeEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
   }, []);
 
   const sourceOrders = useMemo(() => {

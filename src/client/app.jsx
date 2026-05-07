@@ -12,7 +12,12 @@ import StatsPage from "./pages/stats";
 import PrintDiagnosticPage from "./pages/print-diagnostic";
 import FloatingMenu from "./components/FloatingMenu";
 import GlobalNoticeBanner from "./components/GlobalNoticeBanner";
-import { UserProvider, useUser } from "./context";
+import {
+  DEVICE_TOKEN_SCOPE,
+  DEVICE_TOKEN_STORAGE_KEY,
+  UserProvider,
+  useUser,
+} from "./context";
 import { Toaster } from "react-hot-toast";
 import { ensurePrintBridgeReady } from "./utils/printStrategy";
 import {
@@ -20,13 +25,32 @@ import {
   readAppMode,
   writeAppMode,
 } from "./utils/appMode";
-import { clearAllReadCache, getSyncVersion } from "./api";
+import {
+  clearAllReadCache,
+  clearReadCacheByKeys,
+  getInvalidationKeysForMutation,
+  loginWithDeviceToken,
+  getSyncVersion,
+} from "./api";
 import {
   isRealtimeSyncEnabled,
   startRealtimeSyncListener,
 } from "./realtime/firebaseSync";
 
-const REMOTE_SYNC_POLL_MS = 15000;
+const REMOTE_SYNC_POLL_MS = 90000;
+const REALTIME_INVALIDATION_DEBOUNCE_MS = 180;
+const REALTIME_GUARD_POLL_COOLDOWN_MS = 10000;
+const REALTIME_POLL_DEDUP_WINDOW_MS = 1500;
+const markPerf = (name, detail = null) => {
+  try {
+    const perf = window.__SOANHANG_PERF__;
+    if (perf && typeof perf.mark === "function") {
+      perf.mark(name, detail);
+    }
+  } catch (_) {
+    // Ignore perf logging failures.
+  }
+};
 
 const toBool = (value) => {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -110,14 +134,102 @@ function AppContent() {
   const [initDone, setInitDone] = useState(false);
   const [printParams, setPrintParams] = useState(null);
   const [appMode, setAppModeState] = useState(() => readAppMode());
-  const [syncNonce, setSyncNonce] = useState(0);
+  const [autoLoginChecked, setAutoLoginChecked] = useState(false);
   const [realtimeActive, setRealtimeActive] = useState(false);
   const [isPageVisible, setIsPageVisible] = useState(() => {
     if (typeof document === "undefined") return true;
     return document.visibilityState === "visible";
   });
   const lastSyncVersionRef = useRef("");
+  const pollSyncVersionNowRef = useRef(async () => {});
+  const lastGuardPollAtRef = useRef(0);
+  const syncVersionInFlightRef = useRef(false);
+  const lastRealtimeSignalAtRef = useRef(0);
+  const pendingInvalidationKeysRef = useRef(new Set());
+  const invalidationFlushTimerRef = useRef(null);
+  const perfInitDoneLoggedRef = useRef(false);
+  const perfUserReadyLoggedRef = useRef(false);
+  const perfLoginVisibleLoggedRef = useRef(false);
   const isPosMode = appMode === "pos";
+
+  useEffect(() => {
+    markPerf("app_content_mount");
+  }, []);
+
+  useEffect(() => {
+    if (!initDone || perfInitDoneLoggedRef.current) return;
+    perfInitDoneLoggedRef.current = true;
+    markPerf("app_init_done", { hasPrintParams: !!printParams });
+    requestAnimationFrame(() => {
+      markPerf("app_first_ready_frame");
+      try {
+        window.__SOANHANG_PERF__?.print?.();
+      } catch (_) {
+        // Ignore perf summary print failures.
+      }
+    });
+  }, [initDone, printParams]);
+
+  useEffect(() => {
+    if (initDone && !user && !perfLoginVisibleLoggedRef.current) {
+      perfLoginVisibleLoggedRef.current = true;
+      markPerf("login_screen_visible");
+      return;
+    }
+    if (user) {
+      perfLoginVisibleLoggedRef.current = false;
+    }
+  }, [initDone, user]);
+
+  useEffect(() => {
+    if (!user) {
+      perfUserReadyLoggedRef.current = false;
+      return;
+    }
+    if (perfUserReadyLoggedRef.current) return;
+    perfUserReadyLoggedRef.current = true;
+    markPerf("user_authenticated", { role: String(user?.role || "") });
+  }, [user]);
+
+  useEffect(() => {
+    if (!initDone || !user) return;
+    const route = String(currentPath || "");
+    markPerf("route_switch", { route });
+    requestAnimationFrame(() => {
+      markPerf("route_frame_ready", { route });
+    });
+  }, [currentPath, initDone, user]);
+
+  useEffect(() => {
+    if (!realtimeActive) return;
+    markPerf("realtime_listener_ready");
+  }, [realtimeActive]);
+
+  const flushPendingInvalidation = useCallback((meta = {}) => {
+    const keys = Array.from(pendingInvalidationKeysRef.current);
+    pendingInvalidationKeysRef.current.clear();
+    if (invalidationFlushTimerRef.current) {
+      window.clearTimeout(invalidationFlushTimerRef.current);
+      invalidationFlushTimerRef.current = null;
+    }
+    if (!keys.length) return;
+    clearReadCacheByKeys(keys, meta);
+  }, []);
+
+  const enqueueInvalidationKeys = useCallback((keys = [], meta = {}) => {
+    keys.forEach((k) => {
+      const normalized = String(k || "").trim();
+      if (normalized) pendingInvalidationKeysRef.current.add(normalized);
+    });
+    if (!pendingInvalidationKeysRef.current.size) return;
+
+    if (invalidationFlushTimerRef.current) {
+      window.clearTimeout(invalidationFlushTimerRef.current);
+    }
+    invalidationFlushTimerRef.current = window.setTimeout(() => {
+      flushPendingInvalidation(meta);
+    }, REALTIME_INVALIDATION_DEBOUNCE_MS);
+  }, [flushPendingInvalidation]);
 
   const setAppMode = useCallback((nextMode) => {
     const next = writeAppMode(nextMode);
@@ -210,6 +322,48 @@ function AppContent() {
   }, [user]);
 
   useEffect(() => {
+    if (!initDone) return;
+    if (user) {
+      setAutoLoginChecked(true);
+      return;
+    }
+    if (autoLoginChecked) return;
+
+    let cancelled = false;
+    const tryAutoLogin = async () => {
+      const token = String(
+        localStorage.getItem(DEVICE_TOKEN_STORAGE_KEY) || "",
+      ).trim();
+      if (!token) {
+        if (!cancelled) setAutoLoginChecked(true);
+        return;
+      }
+      try {
+        const res = await loginWithDeviceToken(token, DEVICE_TOKEN_SCOPE);
+        if (cancelled) return;
+        if (res?.success && res?.data) {
+          const nextToken = String(res?.data?.deviceToken || token).trim();
+          if (nextToken) {
+            localStorage.setItem(DEVICE_TOKEN_STORAGE_KEY, nextToken);
+          }
+          setUser(res.data);
+        } else {
+          localStorage.removeItem(DEVICE_TOKEN_STORAGE_KEY);
+        }
+      } catch (_) {
+        // Silent to avoid blocking manual login fallback.
+      } finally {
+        if (!cancelled) setAutoLoginChecked(true);
+      }
+    };
+
+    tryAutoLogin();
+    return () => {
+      cancelled = true;
+    };
+  }, [autoLoginChecked, initDone, setUser, user]);
+
+  useEffect(() => {
     if (!user || !isPosMode) return;
     if (!("wakeLock" in navigator) || !window.isSecureContext) return;
     let released = false;
@@ -250,12 +404,12 @@ function AppContent() {
       return;
     }
 
-    if (realtimeActive) return;
-
     let disposed = false;
 
-    const pollVersion = async () => {
-      if (document.visibilityState !== "visible") return;
+    const pollVersion = async ({ force = false } = {}) => {
+      if (!force && document.visibilityState !== "visible") return;
+      if (syncVersionInFlightRef.current) return;
+      syncVersionInFlightRef.current = true;
       try {
         const res = await getSyncVersion();
         if (disposed || !res?.success) return;
@@ -270,13 +424,23 @@ function AppContent() {
 
         if (nextVersion !== prevVersion) {
           lastSyncVersionRef.current = nextVersion;
-          clearAllReadCache();
-          setSyncNonce((v) => v + 1);
+          if (Date.now() - lastRealtimeSignalAtRef.current <= REALTIME_POLL_DEDUP_WINDOW_MS) {
+            return;
+          }
+          flushPendingInvalidation({
+            source: "remote_version_poll_flush",
+          });
+          clearAllReadCache({
+            source: "remote_version_poll",
+          });
         }
       } catch (_) {
         // Keep polling silent to avoid interrupting user flow.
+      } finally {
+        syncVersionInFlightRef.current = false;
       }
     };
+    pollSyncVersionNowRef.current = pollVersion;
 
     pollVersion();
     const timer = window.setInterval(pollVersion, REMOTE_SYNC_POLL_MS);
@@ -289,10 +453,11 @@ function AppContent() {
 
     return () => {
       disposed = true;
+      pollSyncVersionNowRef.current = async () => {};
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [user, realtimeActive]);
+  }, [user]);
 
   useEffect(() => {
     if (!user) {
@@ -307,28 +472,67 @@ function AppContent() {
       setRealtimeActive(false);
       return;
     }
+    let disposed = false;
+    let stopListening = null;
 
-    const stopListening = startRealtimeSyncListener({
+    stopListening = startRealtimeSyncListener({
       onReady: () => {
-        setRealtimeActive(true);
+        if (!disposed) setRealtimeActive(true);
       },
       onError: () => {
-        setRealtimeActive(false);
+        if (!disposed) setRealtimeActive(false);
       },
-      onRemoteSignal: () => {
-        clearAllReadCache();
-        setSyncNonce((v) => v + 1);
+      onRemoteSignal: ({ mutation, invalidateKeys }) => {
+        if (disposed) return;
+        lastRealtimeSignalAtRef.current = Date.now();
+        const directKeys = Array.isArray(invalidateKeys)
+          ? invalidateKeys.filter((k) => typeof k === "string" && k.trim())
+          : [];
+        const keys = directKeys.length
+          ? directKeys
+          : getInvalidationKeysForMutation(mutation);
+        if (keys.length) {
+          enqueueInvalidationKeys(keys, {
+            source: "realtime_signal",
+            mutation: String(mutation || ""),
+          });
+          return;
+        }
+        flushPendingInvalidation({
+          source: "realtime_signal_unknown_mutation_flush",
+          mutation: String(mutation || ""),
+        });
+        // Fallback broad refresh only when mutation metadata is unusable.
+        clearAllReadCache({
+          source: "realtime_signal_unknown_mutation",
+          mutation: String(mutation || ""),
+        });
+        const now = Date.now();
+        if (
+          now - lastGuardPollAtRef.current >=
+          REALTIME_GUARD_POLL_COOLDOWN_MS
+        ) {
+          lastGuardPollAtRef.current = now;
+          pollSyncVersionNowRef.current({ force: true }).catch(() => {});
+        }
       },
     });
 
     return () => {
+      disposed = true;
+      flushPendingInvalidation({ source: "realtime_listener_cleanup_flush" });
       if (typeof stopListening === "function") {
         stopListening();
       }
+      if (invalidationFlushTimerRef.current) {
+        window.clearTimeout(invalidationFlushTimerRef.current);
+        invalidationFlushTimerRef.current = null;
+      }
+      pendingInvalidationKeysRef.current.clear();
     };
-  }, [user, isPageVisible]);
+  }, [user, isPageVisible, enqueueInvalidationKeys, flushPendingInvalidation]);
 
-  if (!initDone) {
+  if (!initDone || (!user && !autoLoginChecked)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center">
@@ -390,7 +594,7 @@ function AppContent() {
     return (
       <div className={`min-h-screen ${isPosMode ? "bg-slate-100 pb-24" : "bg-slate-50"}`}>
         <GlobalNoticeBanner />
-        <div key={`${currentPath}:${syncNonce}`} className={isPosMode ? "" : "md:pl-72"}>
+        <div className={isPosMode ? "" : "md:pl-72"}>
           {renderPage()}
         </div>
         <FloatingMenu

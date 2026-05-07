@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import {
+  CACHE_INVALIDATED_EVENT,
+  CACHE_KEYS,
   createInventoryReceipt,
   getNextInventoryReceiptDefaults,
   getProductCatalog,
@@ -469,33 +471,58 @@ export default function InventoryPage({ user }) {
     }
   };
 
+  const loadCatalogAndSuggestions = async () => {
+    const [catRes, sugRes] = await Promise.all([
+      getProductCatalog(),
+      getInventorySuggestions(),
+    ]);
+    let catalog = [];
+    if (catRes?.success && Array.isArray(catRes.data)) {
+      catalog = catRes.data;
+      setProductCatalog(catalog);
+    }
+    if (sugRes?.success && Array.isArray(sugRes.data)) {
+      const suggestionsWithImages = sugRes.data.map((s) => {
+        const match = catalog.find(
+          (c) => foldText(c.tenSanPham) === foldText(s.tenSanPham),
+        );
+        return { ...s, anhSanPham: match ? match.anhSanPham : "" };
+      });
+      setProductSuggestions(suggestionsWithImages);
+    }
+  };
+
+  const loadSuppliers = async () => {
+    const res = await getSupplierCatalog();
+    if (res?.success && Array.isArray(res.data)) {
+      setSupplierCatalog(res.data);
+    }
+  };
+
   useEffect(() => {
     loadReceiptDefaults();
 
-    Promise.all([getProductCatalog(), getInventorySuggestions()]).then(
-      ([catRes, sugRes]) => {
-        let catalog = [];
-        if (catRes?.success && Array.isArray(catRes.data)) {
-          catalog = catRes.data;
-          setProductCatalog(catalog);
-        }
-        if (sugRes?.success && Array.isArray(sugRes.data)) {
-          const suggestionsWithImages = sugRes.data.map((s) => {
-            const match = catalog.find(
-              (c) => foldText(c.tenSanPham) === foldText(s.tenSanPham)
-            );
-            return { ...s, anhSanPham: match ? match.anhSanPham : "" };
-          });
-          setProductSuggestions(suggestionsWithImages);
-        }
-      }
-    );
+    loadCatalogAndSuggestions().catch(() => {});
+    loadSuppliers().catch(() => {});
+  }, []);
 
-    getSupplierCatalog().then((res) => {
-      if (res?.success && Array.isArray(res.data)) {
-        setSupplierCatalog(res.data);
+  useEffect(() => {
+    const onInvalidated = (event) => {
+      const keys = event?.detail?.keys;
+      if (!Array.isArray(keys)) return;
+      if (
+        keys.includes(CACHE_KEYS.productCatalog) ||
+        keys.includes(CACHE_KEYS.inventorySuggestions)
+      ) {
+        loadCatalogAndSuggestions().catch(() => {});
       }
-    });
+      if (keys.includes(CACHE_KEYS.supplierCatalog)) {
+        loadSuppliers().catch(() => {});
+      }
+    };
+    window.addEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
+    return () =>
+      window.removeEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
   }, []);
 
   const supplierSuggestions = supplierCatalog
@@ -664,25 +691,8 @@ export default function InventoryPage({ user }) {
         // Reload data in background
         Promise.all([
           loadReceiptDefaults(),
-          Promise.all([getProductCatalog(), getInventorySuggestions()]).then(([catRes, sugRes]) => {
-            let catalog = [];
-            if (catRes?.success && Array.isArray(catRes.data)) {
-              catalog = catRes.data;
-              setProductCatalog(catalog);
-            }
-            if (sugRes?.success && Array.isArray(sugRes.data)) {
-              const suggestionsWithImages = sugRes.data.map((s) => {
-                const match = catalog.find(
-                  (c) => foldText(c.tenSanPham) === foldText(s.tenSanPham)
-                );
-                return { ...s, anhSanPham: match ? match.anhSanPham : "" };
-              });
-              setProductSuggestions(suggestionsWithImages);
-            }
-          }),
-          getSupplierCatalog().then((r) => {
-            if (r?.success && Array.isArray(r.data)) setSupplierCatalog(r.data);
-          }),
+          loadCatalogAndSuggestions(),
+          loadSuppliers(),
         ]).catch(() => {});
       },
     });
@@ -707,11 +717,11 @@ export default function InventoryPage({ user }) {
               Nhập Hàng
             </h1>
             <h2 className="text-4xl md:text-5xl font-black bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent leading-[1.15] md:leading-[1.2] pb-1">
-              Vào Kho
+              Chi Tiêu Gia Đình
             </h2>
           </div>
           <p className="text-sm md:text-base text-slate-500 max-w-md leading-relaxed font-medium">
-            Tạo phiếu cập nhật số lượng và giá vốn sản phẩm vào kho hệ thống.
+            Ghi nhận nhập hàng và chi tiêu gia đình theo cùng một luồng vận hành.
           </p>
         </div>
 

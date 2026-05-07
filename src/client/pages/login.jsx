@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { login, call } from "../api/index.js"
 import { getNextOrderFormDefaults } from "../api"
+import { DEVICE_TOKEN_SCOPE, DEVICE_TOKEN_STORAGE_KEY } from "../context";
 import brandLogo from "../assets/logo-dulia.jpg"
 
 const ORDER_DEFAULTS_CACHE_KEY = "soanhang.orderDefaults"
@@ -58,8 +59,12 @@ export default function LoginPage({
     setError("")
     setLoading(true)
     try {
-      const res = await login(email, password)
+      const res = await login(email, password, DEVICE_TOKEN_SCOPE)
       if (res.success) {
+        const token = String(res?.data?.deviceToken || "").trim();
+        if (token) {
+          localStorage.setItem(DEVICE_TOKEN_STORAGE_KEY, token);
+        }
         prefetchOrderDefaults()
         onLoginSuccess(res.data)
       } else {

@@ -95,6 +95,71 @@ const MOCK_BANK_CONFIG = {
   accountName: "Nguyễn Anh Đức",
 };
 
+const ROOM_STATUS = Object.freeze({
+  AVAILABLE: "Trống",
+  IN_HOUSE: "Đang ở",
+  CLEANING: "Đang dọn",
+  BOOKED: "Đã đặt trước",
+  MAINTENANCE: "Bảo trì",
+});
+
+const STAY_STATUS = Object.freeze({
+  BOOKED: "BOOKED",
+  IN_HOUSE: "IN_HOUSE",
+  CHECKED_OUT: "CHECKED_OUT",
+  CANCELLED: "CANCELLED",
+});
+
+const MOCK_ROOMS = [
+  {
+    maPhong: "P101",
+    tenPhong: "Phòng 101",
+    loaiPhong: "Deluxe",
+    trangThaiPhong: ROOM_STATUS.AVAILABLE,
+    giaTheoDem: 650000,
+    giaTheoGio: 120000,
+    soKhachToiDa: 2,
+    ghiChu: "",
+    updatedAt: "",
+  },
+  {
+    maPhong: "P102",
+    tenPhong: "Phòng 102",
+    loaiPhong: "Standard",
+    trangThaiPhong: ROOM_STATUS.CLEANING,
+    giaTheoDem: 520000,
+    giaTheoGio: 95000,
+    soKhachToiDa: 2,
+    ghiChu: "",
+    updatedAt: "",
+  },
+  {
+    maPhong: "P201",
+    tenPhong: "Phòng 201",
+    loaiPhong: "Family",
+    trangThaiPhong: ROOM_STATUS.BOOKED,
+    giaTheoDem: 880000,
+    giaTheoGio: 160000,
+    soKhachToiDa: 4,
+    ghiChu: "",
+    updatedAt: "",
+  },
+  {
+    maPhong: "P202",
+    tenPhong: "Phòng 202",
+    loaiPhong: "Suite",
+    trangThaiPhong: ROOM_STATUS.MAINTENANCE,
+    giaTheoDem: 1200000,
+    giaTheoGio: 250000,
+    soKhachToiDa: 3,
+    ghiChu: "Đang sửa điều hòa",
+    updatedAt: "",
+  },
+];
+
+const MOCK_STAYS = [];
+const MOCK_STAY_SERVICE_ITEMS = [];
+
 const LOCAL_SYNC_VERSION_KEY = "soanhang_local_sync_version";
 
 const MOCK_ORDER_HISTORY = [
@@ -645,6 +710,7 @@ const MOCK_ORDER_HISTORY = [
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let mockLatestOrderCode = "DH001";
 let mockLatestReceiptCode = "NK001";
+let mockLatestStayCode = "LT00000";
 const foldText = (v) =>
   String(v || "")
     .toLowerCase()
@@ -670,6 +736,121 @@ const incrementOrderCode = (value, defaultVal) => {
   const digits = m[2];
   const next = String(parseInt(digits, 10) + 1).padStart(digits.length, "0");
   return prefix + next;
+};
+
+const normalizeProductType = (item) => {
+  const rawType = String(item?.loai || "").trim().toUpperCase();
+  if (rawType) return rawType;
+  const group = foldText(item?.nhomHang);
+  if (
+    group.includes("phòng") ||
+    group.includes("room")
+  )
+    return "ROOM";
+  if (
+    group.includes("dịch vụ") ||
+    group.includes("service")
+  )
+    return "DICH_VU";
+  if (
+    group.includes("đồ ăn") ||
+    group.includes("thức uống") ||
+    group.includes("nuoc") ||
+    group.includes("banh")
+  )
+    return "MENU";
+  return "VAT_TU";
+};
+
+const toIsoStringOrNow = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return new Date().toISOString();
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return new Date().toISOString();
+  return parsed.toISOString();
+};
+
+const diffHoursRoundedUp = (startAt, endAt) => {
+  const start = new Date(startAt).getTime();
+  const end = new Date(endAt).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 1;
+  return Math.max(1, Math.ceil((end - start) / (60 * 60 * 1000)));
+};
+
+const diffNightsRoundedUp = (startAt, endAt) => {
+  const start = new Date(startAt).getTime();
+  const end = new Date(endAt).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 1;
+  return Math.max(1, Math.ceil((end - start) / (24 * 60 * 60 * 1000)));
+};
+
+const nextStayCode = () => {
+  mockLatestStayCode = incrementOrderCode(mockLatestStayCode, "LT00001");
+  return mockLatestStayCode;
+};
+
+const ensureCatalogItemIdentity = (item, idx) => {
+  const tenSanPham = String(item?.tenSanPham || "").trim();
+  const donVi = String(item?.donVi || "").trim();
+  const maSanPham =
+    String(item?.maSanPham || "").trim() ||
+    `SP${String(idx + 1).padStart(4, "0")}`;
+  return {
+    ...item,
+    maSanPham,
+    tenSanPham,
+    donVi,
+    loai: normalizeProductType(item),
+    theoDoiTonKho: item?.theoDoiTonKho !== false,
+    active: item?.active !== false,
+  };
+};
+
+const buildStaySnapshot = (stay) => {
+  const serviceItems = MOCK_STAY_SERVICE_ITEMS.filter(
+    (x) => String(x.maLuuTru) === String(stay.maLuuTru),
+  );
+  const tienDichVu = serviceItems.reduce(
+    (sum, item) => sum + Number(item.thanhTien || 0),
+    0,
+  );
+  const tongThanhToan = Number(stay.tienPhong || 0) + tienDichVu;
+  const daThuCheckin = Number(stay.daThuCheckin || 0);
+  const status = String(stay.trangThaiLuuTru || "").toUpperCase();
+  const canThuCheckout =
+    status === STAY_STATUS.CHECKED_OUT || status === STAY_STATUS.CANCELLED
+      ? 0
+      : Math.max(tienDichVu, 0);
+  return {
+    ...stay,
+    tienDichVu,
+    tongThanhToan,
+    daThuCheckin,
+    canThuCheckout,
+    serviceItems,
+  };
+};
+
+const canTransitionRoomStatus = (currentStatus, nextStatus) => {
+  const current = String(currentStatus || "").trim();
+  const next = String(nextStatus || "").trim();
+  if (current === next) return true;
+  if (current === ROOM_STATUS.AVAILABLE) {
+    return next === ROOM_STATUS.BOOKED || next === ROOM_STATUS.MAINTENANCE;
+  }
+  if (current === ROOM_STATUS.BOOKED) {
+    return next === ROOM_STATUS.AVAILABLE || next === ROOM_STATUS.MAINTENANCE;
+  }
+  if (current === ROOM_STATUS.IN_HOUSE) {
+    return next === ROOM_STATUS.CLEANING;
+  }
+  if (current === ROOM_STATUS.CLEANING) {
+    return next === ROOM_STATUS.AVAILABLE || next === ROOM_STATUS.MAINTENANCE;
+  }
+  if (current === ROOM_STATUS.MAINTENANCE) {
+    return next === ROOM_STATUS.AVAILABLE;
+  }
+  return false;
 };
 
 const helloServer = async () => {
@@ -755,9 +936,15 @@ const getNextInventoryReceiptDefaults = async () => {
 
 const getProductCatalog = async () => {
   await sleep(150);
+  const data = MOCK_PRODUCTS.map((item, idx) =>
+    ensureCatalogItemIdentity(item, idx),
+  );
+  data.forEach((item, idx) => {
+    MOCK_PRODUCTS[idx] = item;
+  });
   return {
     success: true,
-    data: MOCK_PRODUCTS,
+    data,
   };
 };
 
@@ -766,6 +953,312 @@ const getBankConfig = async () => {
   return {
     success: true,
     data: MOCK_BANK_CONFIG,
+  };
+};
+
+const updateBankConfig = async (payload = {}) => {
+  await sleep(160);
+  const bankCode = String(payload.bankCode || "").trim();
+  const accountNumber = String(payload.accountNumber || "").trim();
+  const accountName = String(payload.accountName || "").trim();
+  if (!bankCode || !accountNumber) {
+    return { success: false, message: "Thiếu ngân hàng hoặc số tài khoản." };
+  }
+  MOCK_BANK_CONFIG.bankCode = bankCode;
+  MOCK_BANK_CONFIG.accountNumber = accountNumber;
+  MOCK_BANK_CONFIG.accountName = accountName;
+  return {
+    success: true,
+    message: "Đã cập nhật thông tin ngân hàng (Mock).",
+    data: { ...MOCK_BANK_CONFIG },
+  };
+};
+
+const getRooms = async () => {
+  await sleep(120);
+  return {
+    success: true,
+    data: [...MOCK_ROOMS].sort((a, b) =>
+      String(a.maPhong || "").localeCompare(String(b.maPhong || ""), "vi"),
+    ),
+  };
+};
+
+const getStayHistory = async (filters = {}) => {
+  await sleep(140);
+  const keyword = foldText(filters?.keyword);
+  const statusFilter = String(filters?.trangThai || "").trim().toUpperCase();
+  const roomFilter = String(filters?.maPhong || "").trim();
+  const fromDate = String(filters?.fromDate || "").trim();
+  const toDate = String(filters?.toDate || "").trim();
+
+  let list = MOCK_STAYS.map((stay) => buildStaySnapshot(stay));
+  if (statusFilter) {
+    list = list.filter((stay) =>
+      String(stay.trangThaiLuuTru || "").toUpperCase() === statusFilter,
+    );
+  }
+  if (roomFilter) {
+    list = list.filter((stay) => String(stay.maPhong || "") === roomFilter);
+  }
+  if (keyword) {
+    list = list.filter((stay) => {
+      const source = [
+        stay.maLuuTru,
+        stay.maPhong,
+        stay.tenKhach,
+        stay.soDienThoai,
+      ]
+        .map((x) => foldText(x))
+        .join(" ");
+      return source.includes(keyword);
+    });
+  }
+  if (fromDate) {
+    const fromMs = new Date(fromDate).getTime();
+    if (Number.isFinite(fromMs)) {
+      list = list.filter(
+        (stay) => new Date(stay.checkinAt || 0).getTime() >= fromMs,
+      );
+    }
+  }
+  if (toDate) {
+    const toMs = new Date(toDate).getTime();
+    if (Number.isFinite(toMs)) {
+      list = list.filter(
+        (stay) => new Date(stay.checkinAt || 0).getTime() <= toMs + 86400000,
+      );
+    }
+  }
+
+  list.sort(
+    (a, b) =>
+      new Date(b.checkinAt || 0).getTime() - new Date(a.checkinAt || 0).getTime(),
+  );
+  return { success: true, data: list };
+};
+
+const createBooking = async (payload = {}) => {
+  await sleep(180);
+  const maPhong = String(payload.maPhong || "").trim();
+  const tenKhach = String(payload.tenKhach || "").trim();
+  if (!maPhong || !tenKhach)
+    return { success: false, message: "Thiếu mã phòng hoặc tên khách." };
+  const room = MOCK_ROOMS.find((x) => String(x.maPhong) === maPhong);
+  if (!room) return { success: false, message: "Không tìm thấy phòng." };
+  if (room.trangThaiPhong === ROOM_STATUS.IN_HOUSE) {
+    return { success: false, message: "Phòng đang có khách ở." };
+  }
+  if (room.trangThaiPhong === ROOM_STATUS.MAINTENANCE) {
+    return { success: false, message: "Phòng đang bảo trì." };
+  }
+  room.trangThaiPhong = ROOM_STATUS.BOOKED;
+  room.updatedAt = new Date().toISOString();
+  return {
+    success: true,
+    message: `Đã đặt trước ${room.tenPhong}.`,
+    data: room,
+  };
+};
+
+const checkInRoom = async (payload = {}) => {
+  await sleep(220);
+  const maPhong = String(payload.maPhong || "").trim();
+  const tenKhach = String(payload.tenKhach || "").trim();
+  if (!maPhong || !tenKhach) {
+    return { success: false, message: "Thiếu thông tin phòng hoặc khách." };
+  }
+  const room = MOCK_ROOMS.find((x) => String(x.maPhong) === maPhong);
+  if (!room) return { success: false, message: "Không tìm thấy phòng." };
+  if (room.trangThaiPhong === ROOM_STATUS.IN_HOUSE) {
+    return { success: false, message: "Phòng đang có khách ở." };
+  }
+  if (room.trangThaiPhong === ROOM_STATUS.MAINTENANCE) {
+    return { success: false, message: "Phòng đang bảo trì." };
+  }
+
+  const hinhThucTinhGia =
+    String(payload.hinhThucTinhGia || "THEO_DEM").trim().toUpperCase() ===
+    "THEO_GIO"
+      ? "THEO_GIO"
+      : "THEO_DEM";
+  const checkinAt = toIsoStringOrNow(payload.checkinAt);
+  const checkoutAtDuKien = toIsoStringOrNow(
+    payload.checkoutAtDuKien || payload.checkinAt,
+  );
+  const donGiaPhongApDung = Math.max(
+    0,
+    Number(
+      payload.donGiaPhongApDung ||
+        (hinhThucTinhGia === "THEO_GIO" ? room.giaTheoGio : room.giaTheoDem),
+    ),
+  );
+  const soGio =
+    hinhThucTinhGia === "THEO_GIO"
+      ? diffHoursRoundedUp(checkinAt, checkoutAtDuKien)
+      : 0;
+  const soDem =
+    hinhThucTinhGia === "THEO_DEM"
+      ? diffNightsRoundedUp(checkinAt, checkoutAtDuKien)
+      : 0;
+  const tienPhong =
+    hinhThucTinhGia === "THEO_GIO"
+      ? soGio * donGiaPhongApDung
+      : soDem * donGiaPhongApDung;
+  const maLuuTru = nextStayCode();
+
+  const stay = {
+    maLuuTru,
+    maPhong,
+    tenKhach,
+    soDienThoai: String(payload.soDienThoai || "").trim(),
+    giayTo: String(payload.giayTo || "").trim(),
+    hinhThucTinhGia,
+    checkinAt,
+    checkoutAtDuKien,
+    checkoutAtThucTe: "",
+    soDem,
+    soGio,
+    donGiaPhongApDung,
+    tienPhong,
+    tienDichVu: 0,
+    tongThanhToan: tienPhong,
+    daThuCheckin: tienPhong,
+    canThuCheckout: 0,
+    trangThaiLuuTru: STAY_STATUS.IN_HOUSE,
+    ghiChu: String(payload.ghiChu || "").trim(),
+  };
+
+  MOCK_STAYS.unshift(stay);
+  room.trangThaiPhong = ROOM_STATUS.IN_HOUSE;
+  room.updatedAt = new Date().toISOString();
+
+  return {
+    success: true,
+    message: `Checkin thành công ${room.tenPhong}.`,
+    data: buildStaySnapshot(stay),
+  };
+};
+
+const addStayServiceItem = async (payload = {}) => {
+  await sleep(200);
+  const maLuuTru = String(payload.maLuuTru || "").trim();
+  if (!maLuuTru) return { success: false, message: "Thiếu mã lưu trú." };
+
+  const stay = MOCK_STAYS.find((x) => String(x.maLuuTru) === maLuuTru);
+  if (!stay) return { success: false, message: "Không tìm thấy hồ sơ lưu trú." };
+  if (stay.trangThaiLuuTru !== STAY_STATUS.IN_HOUSE) {
+    return {
+      success: false,
+      message: "Chỉ có thể thêm dịch vụ cho phòng đang ở.",
+    };
+  }
+
+  const catalog = MOCK_PRODUCTS.map((item, idx) =>
+    ensureCatalogItemIdentity(item, idx),
+  );
+  catalog.forEach((item, idx) => {
+    MOCK_PRODUCTS[idx] = item;
+  });
+  const maSanPham = String(payload.maSanPham || "").trim();
+  const tenSanPham = String(payload.tenSanPham || "").trim();
+  const found = catalog.find(
+    (x) =>
+      String(x.maSanPham || "").trim() === maSanPham ||
+      (tenSanPham && String(x.tenSanPham || "").trim() === tenSanPham),
+  );
+  if (!found) return { success: false, message: "Không tìm thấy dịch vụ/món." };
+
+  const soLuong = Math.max(1, Number(payload.soLuong || 1));
+  const donGia = Math.max(0, Number(payload.donGia || found.donGiaBan || 0));
+  const thanhTien = soLuong * donGia;
+  MOCK_STAY_SERVICE_ITEMS.push({
+    maLuuTru,
+    thoiGian: new Date().toISOString(),
+    maSanPham: found.maSanPham,
+    tenSanPham: found.tenSanPham,
+    nhomHang: found.nhomHang || "",
+    donVi: found.donVi || "",
+    soLuong,
+    donGia,
+    thanhTien,
+    ghiChu: String(payload.ghiChu || "").trim(),
+  });
+
+  stay.tienDichVu = (Number(stay.tienDichVu || 0) + thanhTien);
+  stay.tongThanhToan = Number(stay.tienPhong || 0) + Number(stay.tienDichVu || 0);
+  stay.canThuCheckout = Number(stay.tienDichVu || 0);
+
+  return {
+    success: true,
+    message: "Đã thêm phát sinh dịch vụ.",
+    data: buildStaySnapshot(stay),
+  };
+};
+
+const checkoutRoom = async (payload = {}) => {
+  await sleep(220);
+  const maLuuTru = String(payload.maLuuTru || "").trim();
+  if (!maLuuTru) return { success: false, message: "Thiếu mã lưu trú." };
+  const stay = MOCK_STAYS.find((x) => String(x.maLuuTru) === maLuuTru);
+  if (!stay) return { success: false, message: "Không tìm thấy hồ sơ lưu trú." };
+  if (stay.trangThaiLuuTru !== STAY_STATUS.IN_HOUSE) {
+    return {
+      success: false,
+      message: "Hồ sơ lưu trú không ở trạng thái đang ở.",
+    };
+  }
+
+  stay.checkoutAtThucTe = toIsoStringOrNow(payload.checkoutAtThucTe);
+  stay.trangThaiLuuTru = STAY_STATUS.CHECKED_OUT;
+  stay.ghiChu = String(payload.ghiChu || stay.ghiChu || "").trim();
+  stay.canThuCheckout = 0;
+
+  const room = MOCK_ROOMS.find((x) => String(x.maPhong) === String(stay.maPhong));
+  if (room) {
+    room.trangThaiPhong = ROOM_STATUS.CLEANING;
+    room.updatedAt = new Date().toISOString();
+  }
+
+  return {
+    success: true,
+    message: "Checkout thành công. Phòng chuyển sang Đang dọn.",
+    data: buildStaySnapshot(stay),
+  };
+};
+
+const updateRoomStatus = async (payload = {}) => {
+  await sleep(140);
+  const maPhong = String(payload.maPhong || "").trim();
+  const trangThaiPhong = String(payload.trangThaiPhong || "").trim();
+  if (!maPhong || !trangThaiPhong) {
+    return { success: false, message: "Thiếu mã phòng hoặc trạng thái phòng." };
+  }
+  const room = MOCK_ROOMS.find((x) => String(x.maPhong) === maPhong);
+  if (!room) return { success: false, message: "Không tìm thấy phòng." };
+  if (!canTransitionRoomStatus(room.trangThaiPhong, trangThaiPhong)) {
+    return {
+      success: false,
+      message:
+        "Không thể chuyển trạng thái phòng theo hướng này. Hãy thao tác đúng luồng checkin/checkout.",
+    };
+  }
+  room.trangThaiPhong = trangThaiPhong;
+  room.updatedAt = new Date().toISOString();
+  return { success: true, message: "Đã cập nhật trạng thái phòng.", data: room };
+};
+
+const bootstrapHomestaySheets = async () => {
+  await sleep(80);
+  return {
+    success: true,
+    message:
+      "Mock: đã bootstrap sheet homestay (PHONG, LUU_TRU, LUU_TRU_DICH_VU).",
+    data: {
+      roomRows: 2000,
+      stayRows: 5000,
+      serviceRows: 15000,
+    },
   };
 };
 
@@ -1373,6 +1866,15 @@ const call = async (fnName, ...args) => {
     return getNextInventoryReceiptDefaults();
   if (fnName === "getProductCatalog") return getProductCatalog();
   if (fnName === "getBankConfig") return getBankConfig();
+  if (fnName === "updateBankConfig") return updateBankConfig(args[0]);
+  if (fnName === "getRooms") return getRooms();
+  if (fnName === "getStayHistory") return getStayHistory(args[0]);
+  if (fnName === "createBooking") return createBooking(args[0]);
+  if (fnName === "checkInRoom") return checkInRoom(args[0]);
+  if (fnName === "addStayServiceItem") return addStayServiceItem(args[0]);
+  if (fnName === "checkoutRoom") return checkoutRoom(args[0]);
+  if (fnName === "updateRoomStatus") return updateRoomStatus(args[0]);
+  if (fnName === "bootstrapHomestaySheets") return bootstrapHomestaySheets();
   if (fnName === "updateProductCatalogItem")
     return updateProductCatalogItem(args[0]);
   if (fnName === "createProductCatalogItem")
@@ -1616,6 +2118,15 @@ export const localAdapter = {
   getNextInventoryReceiptDefaults,
   getProductCatalog,
   getBankConfig,
+  updateBankConfig,
+  getRooms,
+  getStayHistory,
+  createBooking,
+  checkInRoom,
+  addStayServiceItem,
+  checkoutRoom,
+  updateRoomStatus,
+  bootstrapHomestaySheets,
   updateProductCatalogItem,
   createProductCatalogItem,
   deleteProductCatalogItem,

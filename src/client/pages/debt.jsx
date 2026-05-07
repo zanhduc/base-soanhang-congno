@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import {
+  CACHE_INVALIDATED_EVENT,
+  CACHE_KEYS,
   deleteOrder,
   getCustomerCatalog,
   getSupplierCatalog,
@@ -521,8 +523,8 @@ export default function DebtPage() {
     return isDebtStatus || toNum(row?.tienNo) > 0;
   };
 
-  const loadDebts = async () => {
-    setLoading(true);
+  const loadDebts = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       if (activeTab === "customers") {
         const res = await getDebtCustomers();
@@ -545,7 +547,7 @@ export default function DebtPage() {
       setRows([]);
       toast.error("Không tải được dữ liệu công nợ");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -588,6 +590,35 @@ export default function DebtPage() {
     return () =>
       window.removeEventListener("inventory_setting_changed", handler);
   }, []);
+
+  useEffect(() => {
+    const onInvalidated = (event) => {
+      const keys = event?.detail?.keys;
+      if (!Array.isArray(keys)) return;
+
+      if (
+        keys.includes(CACHE_KEYS.customerCatalog) ||
+        keys.includes(CACHE_KEYS.supplierCatalog)
+      ) {
+        loadCatalogs();
+      }
+
+      const shouldReloadDebts =
+        (activeTab === "customers" &&
+          (keys.includes(CACHE_KEYS.debtCustomers) ||
+            keys.includes(CACHE_KEYS.orderHistory))) ||
+        (activeTab === "suppliers" &&
+          (keys.includes(CACHE_KEYS.supplierDebts) ||
+            keys.includes(CACHE_KEYS.receiptHistory)));
+
+      if (shouldReloadDebts) {
+        loadDebts({ silent: true });
+      }
+    };
+    window.addEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
+    return () =>
+      window.removeEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
+  }, [activeTab]);
 
   const filteredRows = useMemo(() => {
     const q = foldText(query);

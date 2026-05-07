@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react";
-import { useUser } from "../context";
-import { getAppSetting, setAppSetting } from "../api/index.js";
+import {
+  DEVICE_TOKEN_SCOPE,
+  DEVICE_TOKEN_STORAGE_KEY,
+  useUser,
+} from "../context";
+import {
+  getAppSetting,
+  revokeDeviceToken,
+  setAppSetting,
+} from "../api/index.js";
 import brandLogo from "../assets/logo-dulia.jpg";
 
 const BRAND_LOGO_URL = brandLogo;
@@ -91,13 +99,13 @@ export default function FloatingMenu({
   };
 
   const menuItems = [
-    { id: "create-order", label: "Soạn đơn hàng", icon: "🧾" },
-    { id: "history", label: "Lịch sử hóa đơn", icon: "🕘" },
+    { id: "create-order", label: "Quản lý phòng", icon: "🏨" },
+    { id: "history", label: "Lịch sử lưu trú", icon: "🕘" },
     { id: "products", label: "Quản lý sản phẩm", icon: "📦" },
     ...(showInventory
       ? [
           { id: "stock", label: "Tồn kho", icon: "🏢" },
-          { id: "inventory", label: "Nhập hàng", icon: "📥" },
+          { id: "inventory", label: "Nhập hàng (Chi tiêu gia đình)", icon: "📥" },
         ]
       : []),
     { id: "debt", label: "Quản lý công nợ", icon: "📒" },
@@ -110,9 +118,22 @@ export default function FloatingMenu({
     onNavigate(id);
   };
 
+  const handleLogout = async () => {
+    const token = String(localStorage.getItem(DEVICE_TOKEN_STORAGE_KEY) || "").trim();
+    if (token) {
+      try {
+        await revokeDeviceToken(token, DEVICE_TOKEN_SCOPE);
+      } catch (e) {
+        // Silent fallback to local logout.
+      }
+    }
+    localStorage.removeItem(DEVICE_TOKEN_STORAGE_KEY);
+    logout();
+  };
+
   const posTabs = [
-    { id: "create-order", label: "Soạn đơn", icon: "🧾" },
-    { id: "history", label: "Lịch sử", icon: "🕘" },
+    { id: "create-order", label: "Phòng", icon: "🏨" },
+    { id: "history", label: "Lưu trú", icon: "🕘" },
     { id: "debt", label: "Công nợ", icon: "📒" },
     { id: "print-diagnostic", label: "In", icon: "🖨️" },
   ];
@@ -238,7 +259,7 @@ export default function FloatingMenu({
               {isPosMode ? "POS mode: Bật" : "POS mode: Tắt"}
             </button> */}
             <button
-              onClick={logout}
+              onClick={handleLogout}
               className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-red-600 font-semibold hover:bg-red-50 transition-colors text-sm"
             >
               Đăng xuất
@@ -336,7 +357,7 @@ export default function FloatingMenu({
             {isPosMode ? "POS mode: Bật" : "POS mode: Tắt"}
           </button>
           <button
-            onClick={logout}
+            onClick={handleLogout}
             className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-red-600 font-semibold hover:bg-red-50 transition-colors text-sm"
           >
             Đăng xuất
