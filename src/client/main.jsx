@@ -3,116 +3,6 @@ import ReactDOM from "react-dom/client"
 import App from "./app"
 import "./styles.css"
 
-const createPerfBridge = () => {
-  if (typeof window === "undefined" || typeof performance === "undefined") {
-    return null
-  }
-
-  const readEnabled = () => {
-    try {
-      const search = new URLSearchParams(window.location.search)
-      if (search.get("perf") === "1") return true
-      const hashRaw = String(window.location.hash || "")
-      const hashQueryIdx = hashRaw.indexOf("?")
-      if (hashQueryIdx >= 0) {
-        const hashSearch = new URLSearchParams(hashRaw.slice(hashQueryIdx + 1))
-        if (hashSearch.get("perf") === "1") return true
-      }
-      return window.localStorage?.getItem("soanhang.perf") === "1"
-    } catch (e) {
-      return false
-    }
-  }
-
-  const existing = window.__SOANHANG_PERF__
-  if (existing && typeof existing.mark === "function") {
-    existing.setEnabled?.(readEnabled())
-    return existing
-  }
-
-  const origin = performance.now()
-  const events = []
-  const api = {
-    enabled: readEnabled(),
-    origin,
-    events,
-    setEnabled(next) {
-      api.enabled = !!next
-    },
-    mark(name, detail = null) {
-      if (!api.enabled) return null
-      const now = performance.now()
-      const entry = {
-        name: String(name || ""),
-        t: now,
-        ms: Number((now - origin).toFixed(1)),
-        detail,
-      }
-      events.push(entry)
-      return entry
-    },
-    summary() {
-      if (!events.length) return []
-      const first = events[0].t
-      return events.map((e, idx) => ({
-        idx: idx + 1,
-        event: e.name,
-        since_first_ms: Number((e.t - first).toFixed(1)),
-        since_boot_ms: e.ms,
-        detail: e.detail || "",
-      }))
-    },
-    reset() {
-      events.length = 0
-    },
-    print() {
-      if (!api.enabled) return []
-      const rows = api.summary()
-      if (rows.length && typeof console !== "undefined" && console.table) {
-        console.table(rows)
-      }
-      return rows
-    },
-  }
-
-  window.__SOANHANG_PERF__ = api
-  return api
-}
-
-const perf = createPerfBridge()
-if (perf?.enabled) {
-  let inIframe = false
-  try {
-    inIframe = window.self !== window.top
-  } catch (e) {
-    inIframe = true
-  }
-  perf.mark("boot_script_start", {
-    inIframe,
-    path: window.location.pathname,
-    hash: window.location.hash,
-  })
-}
-
-if (typeof window !== "undefined") {
-  window.SOANHANG_PERF_ENABLE = () => {
-    try {
-      window.localStorage?.setItem("soanhang.perf", "1")
-    } catch (e) {
-      // Ignore storage failures.
-    }
-    window.location.reload()
-  }
-  window.SOANHANG_PERF_DISABLE = () => {
-    try {
-      window.localStorage?.removeItem("soanhang.perf")
-    } catch (e) {
-      // Ignore storage failures.
-    }
-    window.location.reload()
-  }
-}
-
 const globalStyles = `
   :root {
     --bg: #f8fafc;
@@ -186,7 +76,6 @@ if (head) {
   const styleTag = document.createElement("style")
   styleTag.textContent = iframeGlobalStyles
   head.appendChild(styleTag)
-  perf?.mark("global_style_injected")
 
   // Tự động thêm cấu hình viewport chống zoom nếu chạy trong Iframe
   try {
@@ -209,18 +98,11 @@ if (head) {
   }
 }
 
-perf?.mark("react_render_start")
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>
 )
-perf?.mark("react_render_end")
-if (perf?.enabled) {
-  requestAnimationFrame(() => {
-    perf.mark("first_animation_frame")
-  })
-}
 
 const shouldRegisterServiceWorker = (() => {
   if (!("serviceWorker" in navigator)) return false;
@@ -242,13 +124,8 @@ const shouldRegisterServiceWorker = (() => {
 
 if (shouldRegisterServiceWorker) {
   window.addEventListener("load", () => {
-    perf?.mark("window_load")
     navigator.serviceWorker.register("?sw=1").catch(() => {
       // Ignore registration failure in non-PWA environments.
     });
   });
-} else {
-  window.addEventListener("load", () => {
-    perf?.mark("window_load")
-  })
 }

@@ -3,7 +3,6 @@ const AUTH_USER_STORAGE_KEY = "soanhang.auth.user";
 const inflightRefresh = new Map();
 const lastRefreshAt = new Map();
 let mutationSuccessHook = null;
-export const CACHE_INVALIDATED_EVENT = "soanhang_api_cache_invalidated";
 
 function canUseStorage() {
   return (
@@ -77,25 +76,15 @@ export function writeCache(cacheKey, response) {
   }
 }
 
-export function clearCacheByKeys(cacheKeys = [], meta = {}) {
+export function clearCacheByKeys(cacheKeys = []) {
   if (!canUseStorage()) return;
-  const uniqueKeys = Array.from(
-    new Set(
-      (Array.isArray(cacheKeys) ? cacheKeys : [])
-        .map((k) => String(k || "").trim())
-        .filter(Boolean),
-    ),
-  );
-  const clearedKeys = [];
-  uniqueKeys.forEach((cacheKey) => {
+  cacheKeys.forEach((cacheKey) => {
     try {
       window.localStorage.removeItem(buildStorageKey(cacheKey));
-      clearedKeys.push(cacheKey);
     } catch (_) {
       // Ignore remove failures.
     }
   });
-  dispatchCacheInvalidated(clearedKeys, meta);
 }
 
 function isSuccessResponse(response) {
@@ -117,25 +106,6 @@ function dispatchCacheUpdated(cacheKey, response) {
       detail: {
         cacheKey,
         response,
-      },
-    }),
-  );
-}
-
-function dispatchCacheInvalidated(cacheKeys = [], meta = {}) {
-  if (typeof window === "undefined") return;
-  if (meta?.silentEvent) return;
-  const keys = Array.isArray(cacheKeys)
-    ? cacheKeys.filter((k) => typeof k === "string" && k.trim())
-    : [];
-  if (!keys.length) return;
-
-  window.dispatchEvent(
-    new CustomEvent(CACHE_INVALIDATED_EVENT, {
-      detail: {
-        keys,
-        mutation: String(meta?.mutation || "").trim(),
-        source: String(meta?.source || "").trim(),
       },
     }),
   );
@@ -216,10 +186,7 @@ export function createMutationWithInvalidation(fn, invalidateKeys = []) {
   return async (...args) => {
     const result = await fn(...args);
     if (isSuccessResponse(result)) {
-      clearCacheByKeys(invalidateKeys, {
-        source: "local_mutation",
-        mutation: mutationName,
-      });
+      clearCacheByKeys(invalidateKeys);
       if (typeof mutationSuccessHook === "function") {
         Promise.resolve(
           mutationSuccessHook({

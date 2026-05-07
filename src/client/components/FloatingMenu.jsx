@@ -4,11 +4,7 @@ import {
   DEVICE_TOKEN_STORAGE_KEY,
   useUser,
 } from "../context";
-import {
-  getAppSetting,
-  revokeDeviceToken,
-  setAppSetting,
-} from "../api/index.js";
+import { revokeDeviceToken } from "../api/index.js";
 import brandLogo from "../assets/logo-dulia.jpg";
 
 const BRAND_LOGO_URL = brandLogo;
@@ -60,54 +56,11 @@ export default function FloatingMenu({
     return () => window.removeEventListener("click", close);
   }, [isOpen]);
 
-  // Lấy cấu hình bật/tắt nhập kho từ localStorage, sau đó lấy từ server để đồng bộ
-  const [showInventory, setShowInventory] = useState(() => {
-    return localStorage.getItem("enable_inventory") === "true";
-  });
-
-  useEffect(() => {
-    const fetchSetting = async () => {
-      try {
-        const res = await getAppSetting("enable_inventory");
-        if (res?.success && res.data) {
-          const val = res.data === "true";
-          setShowInventory(val);
-          localStorage.setItem("enable_inventory", String(val));
-          window.dispatchEvent(
-            new CustomEvent("inventory_setting_changed", { detail: val }),
-          );
-        }
-      } catch (e) {
-        console.error("Lỗi khi tải cài đặt kho:", e);
-      }
-    };
-    fetchSetting();
-  }, []);
-
-  const toggleInventory = async () => {
-    const newState = !showInventory;
-    setShowInventory(newState);
-    localStorage.setItem("enable_inventory", String(newState));
-    window.dispatchEvent(
-      new CustomEvent("inventory_setting_changed", { detail: newState }),
-    );
-    try {
-      await setAppSetting({ key: "enable_inventory", value: newState });
-    } catch (e) {
-      console.error("Lỗi khi lưu cài đặt kho:", e);
-    }
-  };
-
   const menuItems = [
-    { id: "create-order", label: "Quản lý phòng", icon: "🏨" },
-    { id: "history", label: "Lịch sử lưu trú", icon: "🕘" },
+    { id: "create-order", label: "Soạn đơn hàng", icon: "🧾" },
+    { id: "history", label: "Lịch sử hóa đơn", icon: "🕘" },
     { id: "products", label: "Quản lý sản phẩm", icon: "📦" },
-    ...(showInventory
-      ? [
-          { id: "stock", label: "Tồn kho", icon: "🏢" },
-          { id: "inventory", label: "Nhập hàng (Chi tiêu gia đình)", icon: "📥" },
-        ]
-      : []),
+    { id: "inventory", label: "Nhập nguyên liệu", icon: "📥" },
     { id: "debt", label: "Quản lý công nợ", icon: "📒" },
     { id: "stats", label: "Thống kê", icon: "📊" },
     // { id: "print-diagnostic", label: "Tự kiểm tra in", icon: "🖨️" },
@@ -132,8 +85,8 @@ export default function FloatingMenu({
   };
 
   const posTabs = [
-    { id: "create-order", label: "Phòng", icon: "🏨" },
-    { id: "history", label: "Lưu trú", icon: "🕘" },
+    { id: "create-order", label: "Soạn đơn", icon: "🧾" },
+    { id: "history", label: "Lịch sử", icon: "🕘" },
     { id: "debt", label: "Công nợ", icon: "📒" },
     { id: "print-diagnostic", label: "In", icon: "🖨️" },
   ];
@@ -226,28 +179,6 @@ export default function FloatingMenu({
           </div>
 
           <div className="p-2 border-t border-slate-100 bg-slate-50/50 space-y-1">
-            <div className="px-3 py-2 flex items-center justify-between rounded-xl hover:bg-slate-100/50 transition-colors">
-              <span className="text-[13px] font-medium text-slate-600">
-                Bật tính năng Nhập kho
-              </span>
-              <button
-                onClick={toggleInventory}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                  showInventory ? "bg-emerald-500" : "bg-slate-300"
-                }`}
-              >
-                <span
-                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                    showInventory ? "translate-x-4.5" : "translate-x-1"
-                  }`}
-                  style={{
-                    transform: showInventory
-                      ? "translateX(18px)"
-                      : "translateX(4px)",
-                  }}
-                />
-              </button>
-            </div>
             {/* <button
               onClick={() => onChangeAppMode(isPosMode ? "web" : "pos")}
               className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold transition-colors text-sm ${
@@ -324,28 +255,6 @@ export default function FloatingMenu({
         </div>
 
         <div className="p-3 border-t border-slate-100 bg-slate-50/60 space-y-2">
-          <div className="px-3 py-2 flex items-center justify-between rounded-xl hover:bg-slate-100/50 transition-colors">
-            <span className="text-[13px] font-medium text-slate-600">
-              Bật tính năng Nhập kho
-            </span>
-            <button
-              onClick={toggleInventory}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                showInventory ? "bg-emerald-500" : "bg-slate-300"
-              }`}
-            >
-              <span
-                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                  showInventory ? "translate-x-4.5" : "translate-x-1"
-                }`}
-                style={{
-                  transform: showInventory
-                    ? "translateX(18px)"
-                    : "translateX(4px)",
-                }}
-              />
-            </button>
-          </div>
           <button
             onClick={() => onChangeAppMode(isPosMode ? "web" : "pos")}
             className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold transition-colors text-sm ${

@@ -1,7 +1,6 @@
 import { localAdapter } from "./adapters/localAdapter.js";
 import { gasAdapter } from "./adapters/gasAdapter.js";
 import {
-  CACHE_INVALIDATED_EVENT,
   createLocalFirstReader,
   createMutationWithInvalidation,
   clearCacheByKeys,
@@ -13,11 +12,9 @@ const adapter = import.meta.env.DEV ? localAdapter : gasAdapter;
 
 export const api = adapter;
 
-export const CACHE_KEYS = {
+const CACHE_KEYS = {
   productCatalog: "product_catalog",
   bankConfig: "bank_config",
-  rooms: "rooms",
-  stayHistory: "stay_history",
   customerCatalog: "customer_catalog",
   supplierCatalog: "supplier_catalog",
   debtCustomers: "debt_customers",
@@ -29,9 +26,8 @@ export const CACHE_KEYS = {
 };
 
 const READ_KEYS = Object.values(CACHE_KEYS);
-export { CACHE_INVALIDATED_EVENT };
-
 const INVALIDATION_KEYS = Object.freeze({
+  updateBankConfig: [CACHE_KEYS.bankConfig],
   updateProductCatalogItem: [
     CACHE_KEYS.productCatalog,
     CACHE_KEYS.inventory,
@@ -69,11 +65,6 @@ const INVALIDATION_KEYS = Object.freeze({
     CACHE_KEYS.productCatalog,
     CACHE_KEYS.inventorySuggestions,
   ],
-  createBooking: [CACHE_KEYS.rooms, CACHE_KEYS.stayHistory],
-  checkInRoom: [CACHE_KEYS.rooms, CACHE_KEYS.stayHistory],
-  addStayServiceItem: [CACHE_KEYS.stayHistory],
-  checkoutRoom: [CACHE_KEYS.rooms, CACHE_KEYS.stayHistory],
-  updateRoomStatus: [CACHE_KEYS.rooms],
   updateOrder: [
     CACHE_KEYS.orderHistory,
     CACHE_KEYS.inventory,
@@ -89,10 +80,6 @@ const INVALIDATION_KEYS = Object.freeze({
     CACHE_KEYS.customerCatalog,
   ],
   updateSupplierDebt: [CACHE_KEYS.supplierDebts, CACHE_KEYS.supplierCatalog],
-  issueEasyInvoice: [CACHE_KEYS.orderHistory],
-  cancelEasyInvoice: [CACHE_KEYS.orderHistory],
-  replaceEasyInvoice: [CACHE_KEYS.orderHistory],
-  setAppSetting: [...READ_KEYS],
 });
 
 export function getInvalidationKeysForMutation(mutationName) {
@@ -116,21 +103,11 @@ const BG_SPARSE_60M = {
   refreshCooldownMs: 60 * 60 * 1000,
 };
 
-const publishRealtimeSignal = async ({ mutation, invalidateKeys } = {}) => {
-  return publishRealtimeMutationSignal({
-    mutation,
-    invalidateKeys,
-  });
-};
-
 const withRealtimeSignal = (fn, mutationName) => {
   return async (...args) => {
     const result = await fn(...args);
     if (result?.success) {
-      publishRealtimeSignal({
-        mutation: mutationName,
-        invalidateKeys: getInvalidationKeysForMutation(mutationName),
-      }).catch(() => {
+      publishRealtimeMutationSignal({ mutation: mutationName }).catch(() => {
         // Silent publish failure so mutation UX stays smooth.
       });
     }
@@ -138,19 +115,13 @@ const withRealtimeSignal = (fn, mutationName) => {
   };
 };
 
-setMutationSuccessHook(({ mutationName, invalidateKeys }) => {
-  return publishRealtimeSignal({
-    mutation: mutationName,
-    invalidateKeys: Array.isArray(invalidateKeys)
-      ? invalidateKeys
-      : getInvalidationKeysForMutation(mutationName),
-  });
+setMutationSuccessHook(({ mutationName }) => {
+  return publishRealtimeMutationSignal({ mutation: mutationName });
 });
 
 export const call = adapter.call;
 export const helloServer = adapter.helloServer;
-export const login = (email, password, appScope = "") =>
-  adapter.login(email, password, appScope);
+export const login = adapter.login;
 export const loginWithDeviceToken = (deviceToken, appScope = "") =>
   typeof adapter.loginWithDeviceToken === "function"
     ? adapter.loginWithDeviceToken(deviceToken, appScope)
@@ -178,47 +149,33 @@ export const getBankConfig = createLocalFirstReader(
   adapter.getBankConfig,
   BG_SPARSE_60M,
 );
-export const getRooms = createLocalFirstReader(
-  CACHE_KEYS.rooms,
-  adapter.getRooms,
-  BG_SPARSE_15M,
-);
-export const getStayHistory = createLocalFirstReader(
-  CACHE_KEYS.stayHistory,
-  adapter.getStayHistory,
-  BG_SPARSE_15M,
-);
-export const createBooking = createMutationWithInvalidation(
-  adapter.createBooking,
-  INVALIDATION_KEYS.createBooking,
-);
-export const checkInRoom = createMutationWithInvalidation(
-  adapter.checkInRoom,
-  INVALIDATION_KEYS.checkInRoom,
-);
-export const addStayServiceItem = createMutationWithInvalidation(
-  adapter.addStayServiceItem,
-  INVALIDATION_KEYS.addStayServiceItem,
-);
-export const checkoutRoom = createMutationWithInvalidation(
-  adapter.checkoutRoom,
-  INVALIDATION_KEYS.checkoutRoom,
-);
-export const updateRoomStatus = createMutationWithInvalidation(
-  adapter.updateRoomStatus,
-  INVALIDATION_KEYS.updateRoomStatus,
+export const updateBankConfig = createMutationWithInvalidation(
+  adapter.updateBankConfig,
+  [CACHE_KEYS.bankConfig],
 );
 export const updateProductCatalogItem = createMutationWithInvalidation(
   adapter.updateProductCatalogItem,
-  INVALIDATION_KEYS.updateProductCatalogItem,
+  [
+    CACHE_KEYS.productCatalog,
+    CACHE_KEYS.inventory,
+    CACHE_KEYS.inventorySuggestions,
+  ],
 );
 export const createProductCatalogItem = createMutationWithInvalidation(
   adapter.createProductCatalogItem,
-  INVALIDATION_KEYS.createProductCatalogItem,
+  [
+    CACHE_KEYS.productCatalog,
+    CACHE_KEYS.inventory,
+    CACHE_KEYS.inventorySuggestions,
+  ],
 );
 export const deleteProductCatalogItem = createMutationWithInvalidation(
   adapter.deleteProductCatalogItem,
-  INVALIDATION_KEYS.deleteProductCatalogItem,
+  [
+    CACHE_KEYS.productCatalog,
+    CACHE_KEYS.inventory,
+    CACHE_KEYS.inventorySuggestions,
+  ],
 );
 export const getCustomerCatalog = createLocalFirstReader(
   CACHE_KEYS.customerCatalog,
@@ -237,11 +194,15 @@ export const getDebtCustomers = createLocalFirstReader(
 );
 export const updateDebtCustomer = createMutationWithInvalidation(
   adapter.updateDebtCustomer,
-  INVALIDATION_KEYS.updateDebtCustomer,
+  [
+    CACHE_KEYS.debtCustomers,
+    CACHE_KEYS.orderHistory,
+    CACHE_KEYS.customerCatalog,
+  ],
 );
 export const settleAllDebtCustomers = createMutationWithInvalidation(
   adapter.settleAllDebtCustomers,
-  INVALIDATION_KEYS.settleAllDebtCustomers,
+  [CACHE_KEYS.debtCustomers, CACHE_KEYS.orderHistory],
 );
 export const getOrderHistory = createLocalFirstReader(
   CACHE_KEYS.orderHistory,
@@ -249,27 +210,44 @@ export const getOrderHistory = createLocalFirstReader(
   BG_SPARSE_15M,
 );
 export const createReceiptPdf = adapter.createReceiptPdf;
-export const createOrder = createMutationWithInvalidation(
-  adapter.createOrder,
-  INVALIDATION_KEYS.createOrder,
-);
+export const createOrder = createMutationWithInvalidation(adapter.createOrder, [
+  CACHE_KEYS.orderHistory,
+  CACHE_KEYS.inventory,
+  CACHE_KEYS.debtCustomers,
+  CACHE_KEYS.productCatalog,
+  CACHE_KEYS.inventorySuggestions,
+  CACHE_KEYS.customerCatalog,
+]);
 export const createInventoryReceipt = createMutationWithInvalidation(
   adapter.createInventoryReceipt,
-  INVALIDATION_KEYS.createInventoryReceipt,
+  [
+    CACHE_KEYS.inventory,
+    CACHE_KEYS.receiptHistory,
+    CACHE_KEYS.supplierDebts,
+    CACHE_KEYS.supplierCatalog,
+    CACHE_KEYS.productCatalog,
+    CACHE_KEYS.inventorySuggestions,
+  ],
 );
 export const getInventorySuggestions = createLocalFirstReader(
   CACHE_KEYS.inventorySuggestions,
   adapter.getInventorySuggestions,
   BG_SPARSE_30M,
 );
-export const updateOrder = createMutationWithInvalidation(
-  adapter.updateOrder,
-  INVALIDATION_KEYS.updateOrder,
-);
-export const deleteOrder = createMutationWithInvalidation(
-  adapter.deleteOrder,
-  INVALIDATION_KEYS.deleteOrder,
-);
+export const updateOrder = createMutationWithInvalidation(adapter.updateOrder, [
+  CACHE_KEYS.orderHistory,
+  CACHE_KEYS.inventory,
+  CACHE_KEYS.debtCustomers,
+  CACHE_KEYS.productCatalog,
+  CACHE_KEYS.inventorySuggestions,
+  CACHE_KEYS.customerCatalog,
+]);
+export const deleteOrder = createMutationWithInvalidation(adapter.deleteOrder, [
+  CACHE_KEYS.orderHistory,
+  CACHE_KEYS.inventory,
+  CACHE_KEYS.debtCustomers,
+  CACHE_KEYS.customerCatalog,
+]);
 export const getInventory = createLocalFirstReader(
   CACHE_KEYS.inventory,
   adapter.getInventory,
@@ -292,7 +270,7 @@ export const getSupplierDebts = createLocalFirstReader(
 );
 export const updateSupplierDebt = createMutationWithInvalidation(
   adapter.updateSupplierDebt,
-  INVALIDATION_KEYS.updateSupplierDebt,
+  [CACHE_KEYS.supplierDebts, CACHE_KEYS.supplierCatalog],
 );
 export const formatAllSheets = adapter.formatAllSheets;
 export const uploadImageToImgBB = adapter.uploadImageToImgBB;
@@ -310,9 +288,9 @@ export const replaceEasyInvoice = withRealtimeSignal(
 );
 export const downloadInvoicePDF = adapter.downloadInvoicePDF;
 export const logAction = adapter.logAction;
-export const clearAllReadCache = (meta = {}) => {
-  clearCacheByKeys(READ_KEYS, { source: "manual_clear_all", ...meta });
+export const clearAllReadCache = () => {
+  clearCacheByKeys(READ_KEYS);
 };
-export const clearReadCacheByKeys = (keys = [], meta = {}) => {
-  clearCacheByKeys(keys, meta);
+export const clearReadCacheByKeys = (keys = []) => {
+  clearCacheByKeys(keys);
 };

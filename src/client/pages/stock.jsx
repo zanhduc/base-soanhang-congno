@@ -1,6 +1,7 @@
+// Deprecated in GAS-lengocgato material mode: stock route/menu are disabled.
 import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
-import { CACHE_INVALIDATED_EVENT, CACHE_KEYS, getInventory } from "../api";
+import { getInventory } from "../api";
 
 const foldText = (v) =>
   String(v || "")
@@ -17,8 +18,8 @@ export default function StockPage() {
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState([]);
 
-  const loadInventory = async ({ silent = false } = {}) => {
-    if (!silent) setLoading(true);
+  const loadInventory = async () => {
+    setLoading(true);
     try {
       const res = await getInventory();
       if (res?.success && Array.isArray(res.data)) {
@@ -31,24 +32,12 @@ export default function StockPage() {
       setRows([]);
       toast.error("Không tải được danh sách tồn kho");
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     loadInventory();
-  }, []);
-
-  useEffect(() => {
-    const onInvalidated = (event) => {
-      const keys = event?.detail?.keys;
-      if (!Array.isArray(keys)) return;
-      if (!keys.includes(CACHE_KEYS.inventory)) return;
-      loadInventory({ silent: true });
-    };
-    window.addEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
-    return () =>
-      window.removeEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
   }, []);
 
   const filteredRows = useMemo(() => {

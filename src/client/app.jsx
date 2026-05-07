@@ -6,7 +6,6 @@ import HistoryPage from "./pages/history";
 import ReceiptPage from "./pages/receipt";
 import ProductsPage from "./pages/products";
 import InventoryPage from "./pages/inventory";
-import StockPage from "./pages/stock";
 import DebtPage from "./pages/debt";
 import StatsPage from "./pages/stats";
 import PrintDiagnosticPage from "./pages/print-diagnostic";
@@ -41,16 +40,6 @@ const REMOTE_SYNC_POLL_MS = 90000;
 const REALTIME_INVALIDATION_DEBOUNCE_MS = 180;
 const REALTIME_GUARD_POLL_COOLDOWN_MS = 10000;
 const REALTIME_POLL_DEDUP_WINDOW_MS = 1500;
-const markPerf = (name, detail = null) => {
-  try {
-    const perf = window.__SOANHANG_PERF__;
-    if (perf && typeof perf.mark === "function") {
-      perf.mark(name, detail);
-    }
-  } catch (_) {
-    // Ignore perf logging failures.
-  }
-};
 
 const toBool = (value) => {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -135,6 +124,7 @@ function AppContent() {
   const [printParams, setPrintParams] = useState(null);
   const [appMode, setAppModeState] = useState(() => readAppMode());
   const [autoLoginChecked, setAutoLoginChecked] = useState(false);
+  const [syncNonce, setSyncNonce] = useState(0);
   const [realtimeActive, setRealtimeActive] = useState(false);
   const [isPageVisible, setIsPageVisible] = useState(() => {
     if (typeof document === "undefined") return true;
@@ -147,76 +137,24 @@ function AppContent() {
   const lastRealtimeSignalAtRef = useRef(0);
   const pendingInvalidationKeysRef = useRef(new Set());
   const invalidationFlushTimerRef = useRef(null);
-  const perfInitDoneLoggedRef = useRef(false);
-  const perfUserReadyLoggedRef = useRef(false);
-  const perfLoginVisibleLoggedRef = useRef(false);
   const isPosMode = appMode === "pos";
 
-  useEffect(() => {
-    markPerf("app_content_mount");
-  }, []);
-
-  useEffect(() => {
-    if (!initDone || perfInitDoneLoggedRef.current) return;
-    perfInitDoneLoggedRef.current = true;
-    markPerf("app_init_done", { hasPrintParams: !!printParams });
-    requestAnimationFrame(() => {
-      markPerf("app_first_ready_frame");
-      try {
-        window.__SOANHANG_PERF__?.print?.();
-      } catch (_) {
-        // Ignore perf summary print failures.
-      }
-    });
-  }, [initDone, printParams]);
-
-  useEffect(() => {
-    if (initDone && !user && !perfLoginVisibleLoggedRef.current) {
-      perfLoginVisibleLoggedRef.current = true;
-      markPerf("login_screen_visible");
-      return;
-    }
-    if (user) {
-      perfLoginVisibleLoggedRef.current = false;
-    }
-  }, [initDone, user]);
-
-  useEffect(() => {
-    if (!user) {
-      perfUserReadyLoggedRef.current = false;
-      return;
-    }
-    if (perfUserReadyLoggedRef.current) return;
-    perfUserReadyLoggedRef.current = true;
-    markPerf("user_authenticated", { role: String(user?.role || "") });
-  }, [user]);
-
-  useEffect(() => {
-    if (!initDone || !user) return;
-    const route = String(currentPath || "");
-    markPerf("route_switch", { route });
-    requestAnimationFrame(() => {
-      markPerf("route_frame_ready", { route });
-    });
-  }, [currentPath, initDone, user]);
-
-  useEffect(() => {
-    if (!realtimeActive) return;
-    markPerf("realtime_listener_ready");
-  }, [realtimeActive]);
-
-  const flushPendingInvalidation = useCallback((meta = {}) => {
+  const flushPendingInvalidation = useCallback(({ triggerRender = true } = {}) => {
     const keys = Array.from(pendingInvalidationKeysRef.current);
     pendingInvalidationKeysRef.current.clear();
     if (invalidationFlushTimerRef.current) {
       window.clearTimeout(invalidationFlushTimerRef.current);
       invalidationFlushTimerRef.current = null;
     }
-    if (!keys.length) return;
-    clearReadCacheByKeys(keys, meta);
+    if (!keys.length) return false;
+    clearReadCacheByKeys(keys);
+    if (triggerRender) {
+      setSyncNonce((v) => v + 1);
+    }
+    return true;
   }, []);
 
-  const enqueueInvalidationKeys = useCallback((keys = [], meta = {}) => {
+  const enqueueInvalidationKeys = useCallback((keys = []) => {
     keys.forEach((k) => {
       const normalized = String(k || "").trim();
       if (normalized) pendingInvalidationKeysRef.current.add(normalized);
@@ -227,7 +165,7 @@ function AppContent() {
       window.clearTimeout(invalidationFlushTimerRef.current);
     }
     invalidationFlushTimerRef.current = window.setTimeout(() => {
-      flushPendingInvalidation(meta);
+      flushPendingInvalidation();
     }, REALTIME_INVALIDATION_DEBOUNCE_MS);
   }, [flushPendingInvalidation]);
 
@@ -424,15 +362,15 @@ function AppContent() {
 
         if (nextVersion !== prevVersion) {
           lastSyncVersionRef.current = nextVersion;
+          // A realtime signal may have already refreshed this tab moments ago.
           if (Date.now() - lastRealtimeSignalAtRef.current <= REALTIME_POLL_DEDUP_WINDOW_MS) {
             return;
           }
-          flushPendingInvalidation({
-            source: "remote_version_poll_flush",
-          });
-          clearAllReadCache({
-            source: "remote_version_poll",
-          });
+          const didFlush = flushPendingInvalidation();
+          clearAllReadCache();
+          if (!didFlush) {
+            setSyncNonce((v) => v + 1);
+          }
         }
       } catch (_) {
         // Keep polling silent to avoid interrupting user flow.
@@ -457,7 +395,7 @@ function AppContent() {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [user]);
+  }, [user, flushPendingInvalidation]);
 
   useEffect(() => {
     if (!user) {
@@ -472,10 +410,10 @@ function AppContent() {
       setRealtimeActive(false);
       return;
     }
-    let disposed = false;
-    let stopListening = null;
 
-    stopListening = startRealtimeSyncListener({
+    let disposed = false;
+
+    const stopListening = startRealtimeSyncListener({
       onReady: () => {
         if (!disposed) setRealtimeActive(true);
       },
@@ -492,21 +430,14 @@ function AppContent() {
           ? directKeys
           : getInvalidationKeysForMutation(mutation);
         if (keys.length) {
-          enqueueInvalidationKeys(keys, {
-            source: "realtime_signal",
-            mutation: String(mutation || ""),
-          });
+          enqueueInvalidationKeys(keys);
           return;
         }
-        flushPendingInvalidation({
-          source: "realtime_signal_unknown_mutation_flush",
-          mutation: String(mutation || ""),
-        });
-        // Fallback broad refresh only when mutation metadata is unusable.
-        clearAllReadCache({
-          source: "realtime_signal_unknown_mutation",
-          mutation: String(mutation || ""),
-        });
+        const didFlush = flushPendingInvalidation();
+        clearAllReadCache();
+        if (!didFlush) {
+          setSyncNonce((v) => v + 1);
+        }
         const now = Date.now();
         if (
           now - lastGuardPollAtRef.current >=
@@ -520,7 +451,7 @@ function AppContent() {
 
     return () => {
       disposed = true;
-      flushPendingInvalidation({ source: "realtime_listener_cleanup_flush" });
+      flushPendingInvalidation({ triggerRender: false });
       if (typeof stopListening === "function") {
         stopListening();
       }
@@ -578,8 +509,6 @@ function AppContent() {
           return <ProductsPage user={user} appMode={appMode} />;
         case "inventory":
           return <InventoryPage user={user} appMode={appMode} />;
-        case "stock":
-          return <StockPage user={user} appMode={appMode} />;
         case "debt":
           return <DebtPage user={user} appMode={appMode} />;
         case "stats":
@@ -594,7 +523,7 @@ function AppContent() {
     return (
       <div className={`min-h-screen ${isPosMode ? "bg-slate-100 pb-24" : "bg-slate-50"}`}>
         <GlobalNoticeBanner />
-        <div className={isPosMode ? "" : "md:pl-72"}>
+        <div key={`${currentPath}:${syncNonce}`} className={isPosMode ? "" : "md:pl-72"}>
           {renderPage()}
         </div>
         <FloatingMenu

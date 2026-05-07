@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import {
-  CACHE_INVALIDATED_EVENT,
-  CACHE_KEYS,
   createProductCatalogItem,
   deleteProductCatalogItem,
   getProductCatalog,
@@ -77,7 +75,7 @@ function LabeledMoneyInput({
   return (
     <div className="space-y-1">
       <div
-        className={`min-h-[52px] rounded-xl border px-2.5 py-1.5 ${errCls} grid grid-cols-[auto,1fr] items-center gap-2 ${className}`}
+        className={`h-11 rounded-xl border px-2.5 py-1.5 ${errCls} grid grid-cols-[auto,1fr] items-stretch gap-2 ${className}`}
       >
         <span className="inline-flex self-center pt-0.5 min-w-[84px] items-center justify-start text-[11px] font-bold uppercase tracking-wide leading-none whitespace-nowrap">
           {label} {required && <span className="text-rose-500 ml-0.5">*</span>}
@@ -113,7 +111,7 @@ function LabeledTextInput({
   return (
     <div className="space-y-1">
       <div
-        className={`min-h-[52px] rounded-xl border px-2.5 py-1.5 grid grid-cols-[auto,1fr] items-center gap-2 text-slate-700 ${errCls} ${className}`}
+        className={`h-11 rounded-xl border px-2.5 py-1.5 grid grid-cols-[auto,1fr] items-stretch gap-2 text-slate-700 ${errCls} ${className}`}
       >
         <span className="inline-flex self-center pt-0.5 min-w-[84px] items-center justify-start text-[11px] font-bold uppercase tracking-wide leading-none whitespace-nowrap text-slate-500">
           {label} {required && <span className="text-rose-500 ml-0.5">*</span>}
@@ -175,8 +173,8 @@ export default function ProductsPage() {
     });
   };
 
-  const loadProducts = async ({ silent = false } = {}) => {
-    if (!silent) setLoading(true);
+  const loadProducts = async () => {
+    setLoading(true);
     try {
       const res = await getProductCatalog();
       if (res?.success && Array.isArray(res.data)) {
@@ -189,24 +187,12 @@ export default function ProductsPage() {
       setRows([]);
       toast.error("Không tải được danh sách sản phẩm");
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     loadProducts();
-  }, []);
-
-  useEffect(() => {
-    const onInvalidated = (event) => {
-      const keys = event?.detail?.keys;
-      if (!Array.isArray(keys)) return;
-      if (!keys.includes(CACHE_KEYS.productCatalog)) return;
-      loadProducts({ silent: true });
-    };
-    window.addEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
-    return () =>
-      window.removeEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
   }, []);
 
   const filteredRows = useMemo(() => {
@@ -257,20 +243,6 @@ export default function ProductsPage() {
     setRows((prev) => prev.filter((r) => r.id !== id));
     if (openId === id) setOpenId("");
   };
-
-  const [showInventory, setShowInventory] = useState(
-    () => localStorage.getItem("enable_inventory") === "true",
-  );
-
-  useEffect(() => {
-    const handleSettingChange = (e) => setShowInventory(e.detail);
-    window.addEventListener("inventory_setting_changed", handleSettingChange);
-    return () =>
-      window.removeEventListener(
-        "inventory_setting_changed",
-        handleSettingChange,
-      );
-  }, []);
 
   const validateRow = (row) => {
     const tenSanPham = String(row.tenSanPham || "").trim();
@@ -528,13 +500,6 @@ export default function ProductsPage() {
                       <p className="text-xs text-slate-500 truncate leading-tight">
                         {row.nhomHang ? `${row.nhomHang} • ` : ""}
                         {row.donVi || "-"}
-                        {showInventory && row.tonKho !== undefined && (
-                          <span
-                            className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold ${toNum(row.tonKho) <= 0 ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-600"}`}
-                          >
-                            Tồn: {row.tonKho}
-                          </span>
-                        )}
                       </p>
                     </div>
                     <div className="text-right flex-shrink-0">

@@ -5,7 +5,6 @@ const VALID_ROUTES = [
   "history",
   "products",
   "inventory",
-  "stock",
   "debt",
   "stats",
   "print-diagnostic",

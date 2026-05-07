@@ -1,10 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  CACHE_INVALIDATED_EVENT,
-  CACHE_KEYS,
-  getOrderHistory,
-  getStayHistory,
-} from "../api";
+import { getOrderHistory } from "../api";
 import toast from "react-hot-toast";
 import { getPreviewDataByKey } from "../utils/printStrategy";
 import { fireAndForgetPrintLog } from "../utils/printLogger";
@@ -47,157 +42,6 @@ export default function ReceiptPage({
   const [order, setOrder] = useState(null);
   const [currentSize, setCurrentSize] = useState(size || "58");
   const [didAutoPrint, setDidAutoPrint] = useState(false);
-  const mapStayToReceiptOrder = (stay) => {
-    if (!stay) return null;
-    const status = String(stay?.trangThaiLuuTru || "").toUpperCase();
-    const statusText =
-      status === "BOOKED"
-        ? "Đã đặt trước"
-        : status === "IN_HOUSE"
-          ? "Đang ở"
-          : status === "CHECKED_OUT"
-            ? "Đã checkout"
-            : status === "CANCELLED"
-              ? "Đã hủy"
-              : stay?.trangThaiLuuTru || "-";
-    const serviceRows = Array.isArray(stay.serviceItems) ? stay.serviceItems : [];
-    const roomUnit = stay.hinhThucTinhGia === "THEO_GIO" ? "Giờ" : "Đêm";
-    const roomQty =
-      stay.hinhThucTinhGia === "THEO_GIO"
-        ? Number(stay.soGio || 0)
-        : Number(stay.soDem || 0);
-    const products = [
-      {
-        tenSanPham: `Tiền phòng ${stay.maPhong || ""}`.trim(),
-        donVi: roomUnit,
-        soLuong: Math.max(1, roomQty || 1),
-        giaVon: 0,
-        donGiaBan: Number(stay.donGiaPhongApDung || 0),
-        thanhTien: Number(stay.tienPhong || 0),
-      },
-      ...serviceRows.map((item) => ({
-        tenSanPham: item.tenSanPham,
-        donVi: item.donVi || "",
-        soLuong: Number(item.soLuong || 0),
-        giaVon: 0,
-        donGiaBan: Number(item.donGia || 0),
-        thanhTien: Number(item.thanhTien || 0),
-      })),
-    ];
-    return {
-      maPhieu: stay.maLuuTru,
-      ngayBan: stay.checkinAt || "",
-      tenKhach: stay.tenKhach || "Khách ghé thăm",
-      soDienThoai: stay.soDienThoai || "",
-      ghiChu: stay.ghiChu || "-",
-      trangThai: statusText,
-      tongHoaDon: Number(stay.tongThanhToan || 0),
-      tienNo: Math.max(Number(stay.canThuCheckout || 0), 0),
-      products,
-    };
-  };
-
-  const loadReceiptData = async (retryCount = 0) => {
-    setLoading(true);
-
-    if (isPreview) {
-      const parsedPreview = tryParsePreviewData();
-      if (
-        parsedPreview &&
-        String(parsedPreview.maPhieu || "").trim() === String(code || "").trim()
-      ) {
-        setOrder(parsedPreview);
-        fireAndForgetPrintLog({
-          event: "receipt_data_loaded_preview",
-          code,
-          size: size || "58",
-          mode: "browser",
-        });
-        setLoading(false);
-        return;
-      }
-    }
-
-    try {
-      const res = await getOrderHistory();
-      if (res?.success && Array.isArray(res.data)) {
-        const found = res.data.find(
-          (o) => String(o.maPhieu || "").trim() === String(code || "").trim(),
-        );
-        if (found) {
-          setOrder(found);
-          fireAndForgetPrintLog({
-            event: "receipt_data_loaded_history",
-            code,
-            size: size || "58",
-            mode: "browser",
-          });
-          setLoading(false);
-        } else {
-          const stayRes = await getStayHistory({ keyword: String(code || "") });
-          if (stayRes?.success && Array.isArray(stayRes.data)) {
-            const foundStay = stayRes.data.find(
-              (s) =>
-                String(s.maLuuTru || "").trim() === String(code || "").trim(),
-            );
-            if (foundStay) {
-              const mapped = mapStayToReceiptOrder(foundStay);
-              setOrder(mapped);
-              setLoading(false);
-              return;
-            }
-          }
-          if (retryCount < 3) {
-            setTimeout(() => loadReceiptData(retryCount + 1), 2000);
-            return;
-          }
-          setOrder(null);
-          fireAndForgetPrintLog({
-            event: "receipt_not_found_after_retry",
-            code,
-            size: size || "58",
-            mode: "browser",
-            status: "ERROR",
-            message: "Không tìm thấy hóa đơn trong lịch sử sau khi retry",
-          });
-          setLoading(false);
-          toast.error("Không tìm thấy hóa đơn cần in.");
-        }
-      } else {
-        if (retryCount < 2) {
-          setTimeout(() => loadReceiptData(retryCount + 1), 2000);
-          return;
-        }
-        setOrder(null);
-        fireAndForgetPrintLog({
-          event: "receipt_load_failed_response",
-          code,
-          size: size || "58",
-          mode: "browser",
-          status: "ERROR",
-          message: res?.message || "getOrderHistory response lỗi",
-        });
-        setLoading(false);
-        toast.error(res?.message || "Không tải được hóa đơn.");
-      }
-    } catch (e) {
-      if (retryCount < 2) {
-        setTimeout(() => loadReceiptData(retryCount + 1), 2000);
-        return;
-      }
-      setOrder(null);
-      fireAndForgetPrintLog({
-        event: "receipt_load_failed_exception",
-        code,
-        size: size || "58",
-        mode: "browser",
-        status: "ERROR",
-        message: String(e?.message || e || "Lỗi tải hóa đơn"),
-      });
-      setLoading(false);
-      toast.error("Không tải được hóa đơn.");
-    }
-  };
 
   const tryParsePreviewData = () => {
     const candidates = [
@@ -219,20 +63,95 @@ export default function ReceiptPage({
   };
 
   useEffect(() => {
-    if (code) loadReceiptData();
-  }, [code, isPreview, previewDataStr, previewDataKey]);
+    const load = async (retryCount = 0) => {
+      setLoading(true);
 
-  useEffect(() => {
-    const onInvalidated = (event) => {
-      const keys = event?.detail?.keys;
-      if (!Array.isArray(keys)) return;
-      if (!keys.includes(CACHE_KEYS.orderHistory)) return;
-      if (!code) return;
-      loadReceiptData();
+      if (isPreview) {
+        const parsedPreview = tryParsePreviewData();
+        if (
+          parsedPreview &&
+          String(parsedPreview.maPhieu || "").trim() === String(code || "").trim()
+        ) {
+          setOrder(parsedPreview);
+          fireAndForgetPrintLog({
+            event: "receipt_data_loaded_preview",
+            code,
+            size: size || "58",
+            mode: "browser",
+          });
+          setLoading(false);
+          return;
+        }
+      }
+
+      try {
+        const res = await getOrderHistory();
+        if (res?.success && Array.isArray(res.data)) {
+          const found = res.data.find(
+            (o) => String(o.maPhieu || "").trim() === String(code || "").trim(),
+          );
+          if (found) {
+            setOrder(found);
+            fireAndForgetPrintLog({
+              event: "receipt_data_loaded_history",
+              code,
+              size: size || "58",
+              mode: "browser",
+            });
+            setLoading(false);
+          } else {
+            if (retryCount < 3) {
+              setTimeout(() => load(retryCount + 1), 2000);
+              return;
+            }
+            setOrder(null);
+            fireAndForgetPrintLog({
+              event: "receipt_not_found_after_retry",
+              code,
+              size: size || "58",
+              mode: "browser",
+              status: "ERROR",
+              message: "Không tìm thấy hóa đơn trong lịch sử sau khi retry",
+            });
+            setLoading(false);
+            toast.error("Không tìm thấy hóa đơn cần in.");
+          }
+        } else {
+          if (retryCount < 2) {
+            setTimeout(() => load(retryCount + 1), 2000);
+            return;
+          }
+          setOrder(null);
+          fireAndForgetPrintLog({
+            event: "receipt_load_failed_response",
+            code,
+            size: size || "58",
+            mode: "browser",
+            status: "ERROR",
+            message: res?.message || "getOrderHistory response lỗi",
+          });
+          setLoading(false);
+          toast.error(res?.message || "Không tải được hóa đơn.");
+        }
+      } catch (e) {
+        if (retryCount < 2) {
+          setTimeout(() => load(retryCount + 1), 2000);
+          return;
+        }
+        setOrder(null);
+        fireAndForgetPrintLog({
+          event: "receipt_load_failed_exception",
+          code,
+          size: size || "58",
+          mode: "browser",
+          status: "ERROR",
+          message: String(e?.message || e || "Lỗi tải hóa đơn"),
+        });
+        setLoading(false);
+        toast.error("Không tải được hóa đơn.");
+      }
     };
-    window.addEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
-    return () =>
-      window.removeEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
+    if (code) load();
   }, [code, isPreview, previewDataStr, previewDataKey]);
 
   const view = useMemo(() => {

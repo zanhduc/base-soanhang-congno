@@ -230,181 +230,21 @@ function getDemoAccounts() {
   }
 }
 
-var DEVICE_TOKEN_VERSION = "v1";
-var DEVICE_TOKEN_PREFIX = "auth_device_token:";
-var DEVICE_TOKEN_SECRET_KEY = "AUTH_DEVICE_TOKEN_SECRET";
-var DEVICE_TOKEN_TTL_DAYS = 180;
-
-function normalizeAppScope_(scope) {
-  return String(scope || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .slice(0, 64) || "default";
-}
-
-function getDeviceTokenSecret_() {
-  var props = PropertiesService.getScriptProperties();
-  var secret = String(props.getProperty(DEVICE_TOKEN_SECRET_KEY) || "").trim();
-  if (!secret) {
-    secret = Utilities.getUuid() + ":" + Utilities.getUuid();
-    props.setProperty(DEVICE_TOKEN_SECRET_KEY, secret);
-  }
-  return secret;
-}
-
-function bytesToHex_(bytes) {
-  var out = [];
-  for (var i = 0; i < bytes.length; i++) {
-    var b = bytes[i];
-    if (b < 0) b += 256;
-    var hex = b.toString(16);
-    out.push(hex.length === 1 ? "0" + hex : hex);
-  }
-  return out.join("");
-}
-
-function sha256Hex_(text) {
-  var digest = Utilities.computeDigest(
-    Utilities.DigestAlgorithm.SHA_256,
-    String(text || ""),
-    Utilities.Charset.UTF_8,
-  );
-  return bytesToHex_(digest);
-}
-
-function randomTokenPart_(byteLength) {
-  var targetLen = Math.max(16, Number(byteLength || 16) * 2);
-  var out = "";
-  while (out.length < targetLen) {
-    var seed =
-      Utilities.getUuid() +
-      ":" +
-      Utilities.getUuid() +
-      ":" +
-      String(Date.now()) +
-      ":" +
-      String(Math.random());
-    var digest = Utilities.computeDigest(
-      Utilities.DigestAlgorithm.SHA_256,
-      seed,
-      Utilities.Charset.UTF_8,
-    );
-    out += Utilities.base64EncodeWebSafe(digest).replace(/=+$/g, "");
-  }
-  return out.slice(0, targetLen);
-}
-
-function buildTokenRecordKey_(scope, tokenId) {
-  return (
-    DEVICE_TOKEN_PREFIX + normalizeAppScope_(scope) + ":" + String(tokenId || "")
-  );
-}
-
-function buildAuthUserData_(user, deviceToken, expiresAtMs) {
-  return {
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    department: user.department,
-    deviceToken: String(deviceToken || ""),
-    deviceTokenExpiresAt: Number(expiresAtMs || 0),
-  };
-}
-
-function issueDeviceTokenForUser_(user, appScope) {
-  var scope = normalizeAppScope_(appScope);
-  var tokenId = randomTokenPart_(12);
-  var tokenSecret = randomTokenPart_(24);
-  var token = DEVICE_TOKEN_VERSION + "." + tokenId + "." + tokenSecret;
-  var now = Date.now();
-  var expiresAt = now + DEVICE_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000;
-  var tokenHash = sha256Hex_(
-    tokenId + "." + tokenSecret + "." + getDeviceTokenSecret_(),
-  );
-  var payload = {
-    email: String(user.email || "").trim().toLowerCase(),
-    scope: scope,
-    tokenId: tokenId,
-    tokenHash: tokenHash,
-    issuedAt: now,
-    lastUsedAt: now,
-    expiresAt: expiresAt,
-    revoked: false,
-  };
-  PropertiesService.getScriptProperties().setProperty(
-    buildTokenRecordKey_(scope, tokenId),
-    JSON.stringify(payload),
-  );
-  return { token: token, expiresAt: expiresAt };
-}
-
-function readUserByEmail_(email) {
-  var target = String(email || "").trim().toLowerCase();
-  if (!target) return null;
-  var accounts = readAccounts_();
-  for (var i = 0; i < accounts.length; i++) {
-    var acc = accounts[i];
-    if (String(acc.email || "").trim().toLowerCase() === target) return acc;
-  }
-  return null;
-}
-
-function verifyDeviceToken_(deviceToken, appScope) {
-  var scope = normalizeAppScope_(appScope);
-  var raw = String(deviceToken || "").trim();
-  var parts = raw.split(".");
-  if (
-    parts.length !== 3 ||
-    parts[0] !== DEVICE_TOKEN_VERSION ||
-    !parts[1] ||
-    !parts[2]
-  ) {
-    return { success: false, message: "Token không hợp lệ" };
-  }
-  var tokenId = parts[1];
-  var tokenSecret = parts[2];
-  var recordKey = buildTokenRecordKey_(scope, tokenId);
-  var rawRecord = PropertiesService.getScriptProperties().getProperty(recordKey);
-  if (!rawRecord) return { success: false, message: "Token đã hết hạn" };
-
-  var record = null;
-  try {
-    record = JSON.parse(rawRecord);
-  } catch (e) {
-    return { success: false, message: "Token không hợp lệ" };
-  }
-  if (!record || record.revoked) return { success: false, message: "Token đã thu hồi" };
-  if (Number(record.expiresAt || 0) <= Date.now()) {
-    return { success: false, message: "Token đã hết hạn" };
-  }
-
-  var expectedHash = sha256Hex_(
-    tokenId + "." + tokenSecret + "." + getDeviceTokenSecret_(),
-  );
-  if (String(record.tokenHash || "") !== expectedHash) {
-    return { success: false, message: "Token không hợp lệ" };
-  }
-
-  return {
-    success: true,
-    scope: scope,
-    recordKey: recordKey,
-    record: record,
-  };
-}
-
-function login(email, password, appScope) {
+function login(email, password) {
   try {
     var accounts = readAccounts_();
     var user = accounts.find(function (u) {
       return u.email === email && u.password === password;
     });
     if (user) {
-      var issued = issueDeviceTokenForUser_(user, appScope);
       return {
         success: true,
-        data: buildAuthUserData_(user, issued.token, issued.expiresAt),
+        data: {
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          department: user.department,
+        },
         message: "Đăng nhập thành công!",
       };
     }
@@ -413,64 +253,6 @@ function login(email, password, appScope) {
       data: null,
       message: "Email hoặc mật khẩu không đúng!",
     };
-  } catch (e) {
-    return { success: false, message: "Lỗi: " + e.message };
-  }
-}
-
-function loginWithDeviceToken(deviceToken, appScope) {
-  try {
-    var verified = verifyDeviceToken_(deviceToken, appScope);
-    if (!verified.success) {
-      return {
-        success: false,
-        data: null,
-        message: verified.message || "Token đăng nhập không hợp lệ",
-      };
-    }
-
-    var user = readUserByEmail_(verified.record.email);
-    if (!user) {
-      return {
-        success: false,
-        data: null,
-        message: "Tài khoản không còn tồn tại",
-      };
-    }
-
-    verified.record.lastUsedAt = Date.now();
-    PropertiesService.getScriptProperties().setProperty(
-      verified.recordKey,
-      JSON.stringify(verified.record),
-    );
-
-    return {
-      success: true,
-      data: buildAuthUserData_(
-        user,
-        String(deviceToken || ""),
-        Number(verified.record.expiresAt || 0),
-      ),
-      message: "Khôi phục đăng nhập thành công",
-    };
-  } catch (e) {
-    return { success: false, message: "Lỗi: " + e.message };
-  }
-}
-
-function revokeDeviceToken(deviceToken, appScope) {
-  try {
-    var verified = verifyDeviceToken_(deviceToken, appScope);
-    if (!verified.success) {
-      return { success: true, data: null, message: "Token không còn hiệu lực" };
-    }
-    verified.record.revoked = true;
-    verified.record.revokedAt = Date.now();
-    PropertiesService.getScriptProperties().setProperty(
-      verified.recordKey,
-      JSON.stringify(verified.record),
-    );
-    return { success: true, data: null, message: "Đã đăng xuất thiết bị" };
   } catch (e) {
     return { success: false, message: "Lỗi: " + e.message };
   }
@@ -1332,6 +1114,36 @@ function normalizeBankKey_(value) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+function mapBankFieldByKey_(key) {
+  if (
+    key === "nganhang" ||
+    key === "bank" ||
+    key === "bankcode" ||
+    key === "manganhang"
+  ) {
+    return "bankCode";
+  }
+  if (
+    key === "stk" ||
+    key === "sotaikhoan" ||
+    key === "accountnumber" ||
+    key === "sotk"
+  ) {
+    return "accountNumber";
+  }
+  if (
+    key === "tenchutk" ||
+    key === "chutk" ||
+    key === "tentaikhoan" ||
+    key === "accountname" ||
+    key === "tenchutaikhoan" ||
+    key === "chutaikhoan"
+  ) {
+    return "accountName";
+  }
+  return "";
+}
+
 function getBankConfig() {
   return withSuccessCache_("read:bank_config", 45, function () {
     try {
@@ -1348,36 +1160,6 @@ function getBankConfig() {
       var bankCode = "";
       var accountNumber = "";
       var accountName = "";
-
-      function mapBankFieldByKey_(key) {
-        if (
-          key === "nganhang" ||
-          key === "bank" ||
-          key === "bankcode" ||
-          key === "manganhang"
-        ) {
-          return "bankCode";
-        }
-        if (
-          key === "stk" ||
-          key === "sotaikhoan" ||
-          key === "accountnumber" ||
-          key === "sotk"
-        ) {
-          return "accountNumber";
-        }
-        if (
-          key === "tenchutk" ||
-          key === "chutk" ||
-          key === "tentaikhoan" ||
-          key === "accountname" ||
-          key === "tenchutaikhoan" ||
-          key === "chutaikhoan"
-        ) {
-          return "accountName";
-        }
-        return "";
-      }
 
       // Mode 1: key-value theo cột (A=key, B=value)
       for (var i = 0; i < values.length; i++) {
@@ -1450,6 +1232,174 @@ function getBankConfig() {
       return { success: false, message: "Lỗi: " + e.message, data: null };
     }
   });
+}
+
+function updateBankConfig(payload) {
+  return runWithLockOrQueue_(
+    "UPDATE_BANK_CONFIG",
+    { payload: payload },
+    function () {
+      try {
+        var req = payload || {};
+        var bankCode = String(req.bankCode || "").trim();
+        var accountNumber = String(req.accountNumber || "").trim();
+        var accountName = String(req.accountName || "").trim();
+
+        if (!bankCode || !accountNumber) {
+          return {
+            success: false,
+            message: "Thiếu ngân hàng hoặc số tài khoản.",
+          };
+        }
+
+        var ss = SpreadsheetApp.getActiveSpreadsheet();
+        var sheet = ss.getSheetByName("BANK");
+        if (!sheet) sheet = ss.insertSheet("BANK");
+        if (!sheet) {
+          return { success: false, message: "Không thể tạo sheet BANK." };
+        }
+
+        var minRows = 3;
+        var minCols = 3;
+        if (sheet.getMaxRows() < minRows) {
+          sheet.insertRowsAfter(sheet.getMaxRows(), minRows - sheet.getMaxRows());
+        }
+        if (sheet.getMaxColumns() < minCols) {
+          sheet.insertColumnsAfter(
+            sheet.getMaxColumns(),
+            minCols - sheet.getMaxColumns(),
+          );
+        }
+
+        var lastRow = Math.max(sheet.getLastRow(), 1);
+        var lastCol = Math.max(sheet.getLastColumn(), 3);
+        var values = sheet.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+
+        var kvRows = {};
+        for (var i = 0; i < values.length; i++) {
+          var key = normalizeBankKey_(values[i][0]);
+          var field = mapBankFieldByKey_(key);
+          if (!field || kvRows[field]) continue;
+          var val = String(values[i][1] || "").trim();
+          var valAsKey = normalizeBankKey_(val);
+          if (mapBankFieldByKey_(valAsKey)) continue;
+          kvRows[field] = i + 1;
+        }
+
+        if (kvRows.bankCode && kvRows.accountNumber) {
+          sheet.getRange(kvRows.bankCode, 2).setValue(bankCode);
+          sheet.getRange(kvRows.accountNumber, 2).setValue(accountNumber);
+          if (kvRows.accountName) {
+            sheet.getRange(kvRows.accountName, 2).setValue(accountName);
+          } else {
+            var nameRow = Math.max(kvRows.bankCode, kvRows.accountNumber) + 1;
+            if (sheet.getMaxRows() < nameRow) {
+              sheet.insertRowsAfter(
+                sheet.getMaxRows(),
+                nameRow - sheet.getMaxRows(),
+              );
+            }
+            sheet.getRange(nameRow, 1).setValue("Tên chủ tài khoản");
+            sheet.getRange(nameRow, 2).setValue(accountName);
+          }
+          bumpAppCacheVersion_();
+          return {
+            success: true,
+            message: "Đã cập nhật thông tin ngân hàng.",
+            data: {
+              bankCode: bankCode,
+              accountNumber: accountNumber,
+              accountName: accountName,
+            },
+          };
+        }
+
+        var targetRow = 0;
+        var colMap = {};
+        var headerRowNumber = 0;
+        for (var r = 0; r < values.length; r++) {
+          colMap = {};
+          for (var c = 0; c < values[r].length; c++) {
+            var headerKey = normalizeBankKey_(values[r][c]);
+            var mapped = mapBankFieldByKey_(headerKey);
+            if (mapped && colMap[mapped] === undefined) colMap[mapped] = c + 1;
+          }
+          if (
+            colMap.bankCode !== undefined &&
+            colMap.accountNumber !== undefined
+          ) {
+            headerRowNumber = r + 1;
+            for (var d = r + 1; d < values.length; d++) {
+              var rowData = values[d];
+              var hasAny =
+                String(rowData[colMap.bankCode - 1] || "").trim() ||
+                String(rowData[colMap.accountNumber - 1] || "").trim() ||
+                (colMap.accountName === undefined
+                  ? ""
+                  : String(rowData[colMap.accountName - 1] || "").trim());
+              if (!hasAny) continue;
+              targetRow = d + 1;
+              break;
+            }
+            if (!targetRow) targetRow = r + 2;
+            break;
+          }
+        }
+
+        if (targetRow && colMap.bankCode !== undefined) {
+          sheet.getRange(targetRow, colMap.bankCode).setValue(bankCode);
+          sheet.getRange(targetRow, colMap.accountNumber).setValue(accountNumber);
+          var accountNameCol =
+            colMap.accountName === undefined
+              ? colMap.accountNumber + 1
+              : colMap.accountName;
+          if (sheet.getMaxColumns() < accountNameCol) {
+            sheet.insertColumnsAfter(
+              sheet.getMaxColumns(),
+              accountNameCol - sheet.getMaxColumns(),
+            );
+          }
+          sheet.getRange(targetRow, accountNameCol).setValue(accountName);
+          if (colMap.accountName === undefined) {
+            sheet
+              .getRange(headerRowNumber || targetRow - 1, accountNameCol)
+              .setValue("CHỦ TÀI KHOẢN");
+          }
+          bumpAppCacheVersion_();
+          return {
+            success: true,
+            message: "Đã cập nhật thông tin ngân hàng.",
+            data: {
+              bankCode: bankCode,
+              accountNumber: accountNumber,
+              accountName: accountName,
+            },
+          };
+        }
+
+        sheet.getRange(1, 1, 3, 2).setValues([
+          ["Ngân hàng", bankCode],
+          ["Số tài khoản", accountNumber],
+          ["Chủ tài khoản", accountName],
+        ]);
+        bumpAppCacheVersion_();
+        return {
+          success: true,
+          message: "Đã cập nhật thông tin ngân hàng.",
+          data: {
+            bankCode: bankCode,
+            accountNumber: accountNumber,
+            accountName: accountName,
+          },
+        };
+      } catch (e) {
+        return {
+          success: false,
+          message: "Lỗi: " + e.message,
+        };
+      }
+    },
+  );
 }
 
 function findProductRowByKey_(sheet, dataStartRow, tenSanPham, donVi) {
@@ -4680,606 +4630,8 @@ function replaceEasyInvoice(payload, options) {
   );
 }
 
-// ===== HOMESTAY MODULE =====
-var HOMESTAY_ROOM_STATUSES = {
-  AVAILABLE: "Trống",
-  IN_HOUSE: "Đang ở",
-  CLEANING: "Đang dọn",
-  BOOKED: "Đã đặt trước",
-  MAINTENANCE: "Bảo trì",
-};
-
-var HOMESTAY_STAY_STATUSES = {
-  BOOKED: "BOOKED",
-  IN_HOUSE: "IN_HOUSE",
-  CHECKED_OUT: "CHECKED_OUT",
-  CANCELLED: "CANCELLED",
-};
-
-var HOMESTAY_ROOM_HEADERS = [
-  "STT",
-  "maPhong",
-  "tenPhong",
-  "loaiPhong",
-  "trangThaiPhong",
-  "giaTheoDem",
-  "giaTheoGio",
-  "soKhachToiDa",
-  "ghiChu",
-  "updatedAt",
-];
-var HOMESTAY_STAY_HEADERS = [
-  "STT",
-  "maLuuTru",
-  "maDatPhong",
-  "maPhong",
-  "tenKhach",
-  "soDienThoai",
-  "giayTo",
-  "hinhThucTinhGia",
-  "checkinAt",
-  "checkoutAtDuKien",
-  "checkoutAtThucTe",
-  "soDem",
-  "soGio",
-  "donGiaPhongApDung",
-  "tienPhong",
-  "tienDichVu",
-  "tongThanhToan",
-  "daThuCheckin",
-  "canThuCheckout",
-  "trangThaiLuuTru",
-  "ghiChu",
-];
-var HOMESTAY_SERVICE_HEADERS = [
-  "STT",
-  "maLuuTru",
-  "thoiGian",
-  "maSanPham",
-  "tenSanPham",
-  "nhomHang",
-  "donVi",
-  "soLuong",
-  "donGia",
-  "thanhTien",
-  "ghiChu",
-];
-
-function ensureHomestaySheet_(name, headers, seedRows) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(name);
-  if (!sh) sh = ss.insertSheet(name);
-  if (sh.getLastColumn() < headers.length) {
-    sh.insertColumnsAfter(sh.getLastColumn() || 1, headers.length);
-  }
-  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
-  sh.getRange(1, 1, 1, headers.length).setFontWeight("bold");
-  sh.setFrozenRows(1);
-  if (sh.getLastRow() < 2 && seedRows && seedRows.length) {
-    sh.getRange(2, 1, seedRows.length, headers.length).setValues(seedRows);
-  }
-  return sh;
-}
-
-function readHomestayRows_(sheet, headers) {
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  var values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-  var rows = [];
-  for (var i = 0; i < values.length; i++) {
-    var row = values[i];
-    var hasVal = false;
-    for (var c = 0; c < row.length; c++) {
-      if (String(row[c] || "").trim()) {
-        hasVal = true;
-        break;
-      }
-    }
-    if (!hasVal) continue;
-    var obj = { __row: i + 2 };
-    for (var h = 0; h < headers.length; h++) obj[headers[h]] = row[h];
-    rows.push(obj);
-  }
-  return rows;
-}
-
-function writeHomestayRow_(sheet, headers, rowNumber, payload) {
-  var row = [];
-  for (var i = 0; i < headers.length; i++) {
-    row.push(payload[headers[i]] === undefined ? "" : payload[headers[i]]);
-  }
-  sheet.getRange(rowNumber, 1, 1, headers.length).setValues([row]);
-}
-
-function appendHomestayRow_(sheet, headers, payload) {
-  var rowNo = Math.max(2, sheet.getLastRow() + 1);
-  writeHomestayRow_(sheet, headers, rowNo, payload);
-  return rowNo;
-}
-
-function normalizeRoomStatus_(status) {
-  var s = normalizeCompareText_(status);
-  if (s.indexOf("dang o") !== -1) return HOMESTAY_ROOM_STATUSES.IN_HOUSE;
-  if (s.indexOf("dang don") !== -1) return HOMESTAY_ROOM_STATUSES.CLEANING;
-  if (s.indexOf("dat truoc") !== -1) return HOMESTAY_ROOM_STATUSES.BOOKED;
-  if (s.indexOf("bao tri") !== -1) return HOMESTAY_ROOM_STATUSES.MAINTENANCE;
-  return HOMESTAY_ROOM_STATUSES.AVAILABLE;
-}
-
-function normalizeStayStatus_(status) {
-  var s = String(status || "").trim().toUpperCase();
-  if (s === "IN_HOUSE") return "IN_HOUSE";
-  if (s === "CHECKED_OUT") return "CHECKED_OUT";
-  if (s === "CANCELLED") return "CANCELLED";
-  return "BOOKED";
-}
-
-function parseIsoOrNow_(value) {
-  var raw = String(value || "").trim();
-  if (!raw) return new Date().toISOString();
-  var d = new Date(raw);
-  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-}
-
-function diffHoursRoundedUp_(startIso, endIso) {
-  var s = new Date(startIso).getTime();
-  var e = new Date(endIso).getTime();
-  if (!isFinite(s) || !isFinite(e) || e <= s) return 1;
-  return Math.max(1, Math.ceil((e - s) / 3600000));
-}
-
-function diffNightsRoundedUp_(startIso, endIso) {
-  var s = new Date(startIso).getTime();
-  var e = new Date(endIso).getTime();
-  if (!isFinite(s) || !isFinite(e) || e <= s) return 1;
-  return Math.max(1, Math.ceil((e - s) / 86400000));
-}
-
-function nextCodeFromRows_(rows, key, prefix, defaultCode) {
-  var latest = "";
-  for (var i = 0; i < rows.length; i++) {
-    var code = String(rows[i][key] || "").trim();
-    if (code.indexOf(prefix) === 0) {
-      latest = code;
-      break;
-    }
-  }
-  if (!latest) latest = defaultCode;
-  return incrementOrderCode_(latest, defaultCode);
-}
-
-function buildStaySummary_(stay, serviceRows) {
-  var items = serviceRows.filter(function (x) {
-    return String(x.maLuuTru || "").trim() === String(stay.maLuuTru || "").trim();
-  });
-  var tienDichVu = items.reduce(function (sum, x) {
-    return sum + Number(x.thanhTien || 0);
-  }, 0);
-  var tienPhong = Number(stay.tienPhong || 0);
-  return {
-    maLuuTru: String(stay.maLuuTru || "").trim(),
-    maDatPhong: String(stay.maDatPhong || "").trim(),
-    maPhong: String(stay.maPhong || "").trim(),
-    tenKhach: String(stay.tenKhach || "").trim(),
-    soDienThoai: String(stay.soDienThoai || "").trim(),
-    giayTo: String(stay.giayTo || "").trim(),
-    hinhThucTinhGia: String(stay.hinhThucTinhGia || "THEO_DEM").trim(),
-    checkinAt: String(stay.checkinAt || ""),
-    checkoutAtDuKien: String(stay.checkoutAtDuKien || ""),
-    checkoutAtThucTe: String(stay.checkoutAtThucTe || ""),
-    soDem: Number(stay.soDem || 0),
-    soGio: Number(stay.soGio || 0),
-    donGiaPhongApDung: Number(stay.donGiaPhongApDung || 0),
-    tienPhong: tienPhong,
-    tienDichVu: tienDichVu,
-    tongThanhToan: tienPhong + tienDichVu,
-    daThuCheckin: Number(stay.daThuCheckin || 0),
-    canThuCheckout: Math.max(tienDichVu, 0),
-    trangThaiLuuTru: normalizeStayStatus_(stay.trangThaiLuuTru),
-    ghiChu: String(stay.ghiChu || "").trim(),
-    serviceItems: items.map(function (x) {
-      return {
-        maLuuTru: String(x.maLuuTru || "").trim(),
-        thoiGian: String(x.thoiGian || ""),
-        maSanPham: String(x.maSanPham || "").trim(),
-        tenSanPham: String(x.tenSanPham || "").trim(),
-        nhomHang: String(x.nhomHang || "").trim(),
-        donVi: String(x.donVi || "").trim(),
-        soLuong: Number(x.soLuong || 0),
-        donGia: Number(x.donGia || 0),
-        thanhTien: Number(x.thanhTien || 0),
-        ghiChu: String(x.ghiChu || "").trim(),
-      };
-    }),
-  };
-}
-
-function ensureHomestayFoundation_() {
-  var sampleRooms = [
-    ["1", "P101", "Phòng 101", "Deluxe", HOMESTAY_ROOM_STATUSES.AVAILABLE, 650000, 120000, 2, "", ""],
-    ["2", "P102", "Phòng 102", "Standard", HOMESTAY_ROOM_STATUSES.CLEANING, 520000, 95000, 2, "", ""],
-    ["3", "P201", "Phòng 201", "Family", HOMESTAY_ROOM_STATUSES.BOOKED, 880000, 160000, 4, "", ""],
-    ["4", "P202", "Phòng 202", "Suite", HOMESTAY_ROOM_STATUSES.MAINTENANCE, 1200000, 250000, 3, "Đang sửa điều hòa", ""],
-  ];
-  var roomSheet = ensureHomestaySheet_("PHONG", HOMESTAY_ROOM_HEADERS, sampleRooms);
-  var staySheet = ensureHomestaySheet_("LUU_TRU", HOMESTAY_STAY_HEADERS, []);
-  var serviceSheet = ensureHomestaySheet_(
-    "LUU_TRU_DICH_VU",
-    HOMESTAY_SERVICE_HEADERS,
-    [],
-  );
-  return { roomSheet: roomSheet, staySheet: staySheet, serviceSheet: serviceSheet };
-}
-
-function getRooms() {
-  return withSuccessCache_("read:homestay_rooms", 15, function () {
-    try {
-      var foundation = ensureHomestayFoundation_();
-      var rows = readHomestayRows_(foundation.roomSheet, HOMESTAY_ROOM_HEADERS);
-      return {
-        success: true,
-        data: rows.map(function (r) {
-          return {
-            maPhong: String(r.maPhong || "").trim(),
-            tenPhong: String(r.tenPhong || "").trim(),
-            loaiPhong: String(r.loaiPhong || "").trim(),
-            trangThaiPhong: normalizeRoomStatus_(r.trangThaiPhong),
-            giaTheoDem: Number(r.giaTheoDem || 0),
-            giaTheoGio: Number(r.giaTheoGio || 0),
-            soKhachToiDa: Number(r.soKhachToiDa || 0),
-            ghiChu: String(r.ghiChu || "").trim(),
-            updatedAt: String(r.updatedAt || ""),
-          };
-        }),
-      };
-    } catch (e) {
-      return { success: false, message: "Lỗi: " + e.message, data: [] };
-    }
-  });
-}
-
-function getStayHistory(filters) {
-  return withSuccessCache_("read:homestay_stays", 10, function () {
-    try {
-      var req = filters || {};
-      var foundation = ensureHomestayFoundation_();
-      var stays = readHomestayRows_(foundation.staySheet, HOMESTAY_STAY_HEADERS);
-      var services = readHomestayRows_(
-        foundation.serviceSheet,
-        HOMESTAY_SERVICE_HEADERS,
-      );
-      var items = stays.map(function (x) {
-        return buildStaySummary_(x, services);
-      });
-      var keyword = normalizeCompareText_(req.keyword || "");
-      var st = String(req.trangThai || "").trim().toUpperCase();
-      var room = String(req.maPhong || "").trim();
-      if (st) {
-        items = items.filter(function (x) {
-          return String(x.trangThaiLuuTru || "").toUpperCase() === st;
-        });
-      }
-      if (room) {
-        items = items.filter(function (x) {
-          return String(x.maPhong || "").trim() === room;
-        });
-      }
-      if (keyword) {
-        items = items.filter(function (x) {
-          var source = normalizeCompareText_(
-            [x.maLuuTru, x.maPhong, x.tenKhach, x.soDienThoai].join(" "),
-          );
-          return source.indexOf(keyword) !== -1;
-        });
-      }
-      items.sort(function (a, b) {
-        return new Date(b.checkinAt || 0).getTime() - new Date(a.checkinAt || 0).getTime();
-      });
-      return { success: true, data: items };
-    } catch (e) {
-      return { success: false, message: "Lỗi: " + e.message, data: [] };
-    }
-  });
-}
-
-function createBooking(payload) {
-  try {
-    var req = payload || {};
-    var maPhong = String(req.maPhong || "").trim();
-    var tenKhach = String(req.tenKhach || "").trim();
-    if (!maPhong || !tenKhach) return { success: false, message: "Thiếu mã phòng hoặc tên khách." };
-    var foundation = ensureHomestayFoundation_();
-    var rooms = readHomestayRows_(foundation.roomSheet, HOMESTAY_ROOM_HEADERS);
-    var stays = readHomestayRows_(foundation.staySheet, HOMESTAY_STAY_HEADERS);
-    var room = null;
-    for (var i = 0; i < rooms.length; i++) {
-      if (String(rooms[i].maPhong || "").trim() === maPhong) room = rooms[i];
-    }
-    if (!room) return { success: false, message: "Không tìm thấy phòng." };
-    var roomStatus = normalizeRoomStatus_(room.trangThaiPhong);
-    if (roomStatus === HOMESTAY_ROOM_STATUSES.IN_HOUSE)
-      return { success: false, message: "Phòng đang có khách ở." };
-    if (roomStatus === HOMESTAY_ROOM_STATUSES.MAINTENANCE)
-      return { success: false, message: "Phòng đang bảo trì." };
-
-    var maDatPhong = nextCodeFromRows_(stays, "maDatPhong", "BK", "BK00001");
-    var maLuuTru = nextCodeFromRows_(stays, "maLuuTru", "LT", "LT00001");
-    appendHomestayRow_(foundation.staySheet, HOMESTAY_STAY_HEADERS, {
-      STT: "",
-      maLuuTru: maLuuTru,
-      maDatPhong: maDatPhong,
-      maPhong: maPhong,
-      tenKhach: tenKhach,
-      soDienThoai: String(req.soDienThoai || "").trim(),
-      giayTo: String(req.giayTo || "").trim(),
-      hinhThucTinhGia: String(req.hinhThucTinhGia || "THEO_DEM").trim().toUpperCase(),
-      checkinAt: "",
-      checkoutAtDuKien: parseIsoOrNow_(req.checkoutAtDuKien),
-      checkoutAtThucTe: "",
-      soDem: 0,
-      soGio: 0,
-      donGiaPhongApDung: 0,
-      tienPhong: 0,
-      tienDichVu: 0,
-      tongThanhToan: 0,
-      daThuCheckin: 0,
-      canThuCheckout: 0,
-      trangThaiLuuTru: HOMESTAY_STAY_STATUSES.BOOKED,
-      ghiChu: String(req.ghiChu || "").trim(),
-    });
-
-    room.trangThaiPhong = HOMESTAY_ROOM_STATUSES.BOOKED;
-    room.updatedAt = new Date().toISOString();
-    writeHomestayRow_(foundation.roomSheet, HOMESTAY_ROOM_HEADERS, room.__row, room);
-
-    bumpAppCacheVersion_();
-    return { success: true, message: "Đã đặt trước phòng.", data: { maDatPhong: maDatPhong, maLuuTru: maLuuTru } };
-  } catch (e) {
-    return { success: false, message: "Lỗi: " + e.message };
-  }
-}
-
-function checkInRoom(payload) {
-  try {
-    var req = payload || {};
-    var maPhong = String(req.maPhong || "").trim();
-    var tenKhach = String(req.tenKhach || "").trim();
-    if (!maPhong || !tenKhach) return { success: false, message: "Thiếu mã phòng hoặc tên khách." };
-    var foundation = ensureHomestayFoundation_();
-    var rooms = readHomestayRows_(foundation.roomSheet, HOMESTAY_ROOM_HEADERS);
-    var stays = readHomestayRows_(foundation.staySheet, HOMESTAY_STAY_HEADERS);
-    var room = null;
-    for (var i = 0; i < rooms.length; i++) {
-      if (String(rooms[i].maPhong || "").trim() === maPhong) room = rooms[i];
-    }
-    if (!room) return { success: false, message: "Không tìm thấy phòng." };
-    var roomStatus = normalizeRoomStatus_(room.trangThaiPhong);
-    if (roomStatus === HOMESTAY_ROOM_STATUSES.IN_HOUSE)
-      return { success: false, message: "Phòng đang có khách ở." };
-    if (roomStatus === HOMESTAY_ROOM_STATUSES.MAINTENANCE)
-      return { success: false, message: "Phòng đang bảo trì." };
-
-    var pricingType = String(req.hinhThucTinhGia || "THEO_DEM").trim().toUpperCase();
-    if (pricingType !== "THEO_GIO") pricingType = "THEO_DEM";
-    var checkinAt = parseIsoOrNow_(req.checkinAt);
-    var checkoutAtDuKien = parseIsoOrNow_(req.checkoutAtDuKien || req.checkinAt);
-    var donGia = Math.max(
-      0,
-      Number(req.donGiaPhongApDung || (pricingType === "THEO_GIO" ? room.giaTheoGio : room.giaTheoDem)),
-    );
-    var soGio = pricingType === "THEO_GIO" ? diffHoursRoundedUp_(checkinAt, checkoutAtDuKien) : 0;
-    var soDem = pricingType === "THEO_DEM" ? diffNightsRoundedUp_(checkinAt, checkoutAtDuKien) : 0;
-    var tienPhong = pricingType === "THEO_GIO" ? soGio * donGia : soDem * donGia;
-
-    var bookedStay = null;
-    for (var j = 0; j < stays.length; j++) {
-      if (
-        String(stays[j].maPhong || "").trim() === maPhong &&
-        normalizeStayStatus_(stays[j].trangThaiLuuTru) === HOMESTAY_STAY_STATUSES.BOOKED
-      ) {
-        bookedStay = stays[j];
-        break;
-      }
-    }
-    var maLuuTru = bookedStay
-      ? String(bookedStay.maLuuTru || "").trim()
-      : nextCodeFromRows_(stays, "maLuuTru", "LT", "LT00001");
-    var maDatPhong = bookedStay ? String(bookedStay.maDatPhong || "").trim() : "";
-    var saveStay = {
-      STT: "",
-      maLuuTru: maLuuTru,
-      maDatPhong: maDatPhong,
-      maPhong: maPhong,
-      tenKhach: tenKhach,
-      soDienThoai: String(req.soDienThoai || "").trim(),
-      giayTo: String(req.giayTo || "").trim(),
-      hinhThucTinhGia: pricingType,
-      checkinAt: checkinAt,
-      checkoutAtDuKien: checkoutAtDuKien,
-      checkoutAtThucTe: "",
-      soDem: soDem,
-      soGio: soGio,
-      donGiaPhongApDung: donGia,
-      tienPhong: tienPhong,
-      tienDichVu: Number(bookedStay ? bookedStay.tienDichVu || 0 : 0),
-      tongThanhToan: tienPhong + Number(bookedStay ? bookedStay.tienDichVu || 0 : 0),
-      daThuCheckin: tienPhong,
-      canThuCheckout: Number(bookedStay ? bookedStay.tienDichVu || 0 : 0),
-      trangThaiLuuTru: HOMESTAY_STAY_STATUSES.IN_HOUSE,
-      ghiChu: String(req.ghiChu || "").trim(),
-    };
-
-    if (bookedStay) {
-      writeHomestayRow_(foundation.staySheet, HOMESTAY_STAY_HEADERS, bookedStay.__row, saveStay);
-    } else {
-      appendHomestayRow_(foundation.staySheet, HOMESTAY_STAY_HEADERS, saveStay);
-    }
-
-    room.trangThaiPhong = HOMESTAY_ROOM_STATUSES.IN_HOUSE;
-    room.updatedAt = new Date().toISOString();
-    writeHomestayRow_(foundation.roomSheet, HOMESTAY_ROOM_HEADERS, room.__row, room);
-    appendBankTransferHistory_({
-      ngay: new Date(),
-      khach: tenKhach,
-      soTien: tienPhong,
-      noiDung: maLuuTru + " checkin",
-      maDonHang: maLuuTru,
-      trangThai: "Thu tiền phòng",
-    });
-
-    bumpAppCacheVersion_();
-    return { success: true, message: "Checkin thành công.", data: { maLuuTru: maLuuTru } };
-  } catch (e) {
-    return { success: false, message: "Lỗi: " + e.message };
-  }
-}
-
-function addStayServiceItem(payload) {
-  try {
-    var req = payload || {};
-    var maLuuTru = String(req.maLuuTru || "").trim();
-    if (!maLuuTru) return { success: false, message: "Thiếu mã lưu trú." };
-    var foundation = ensureHomestayFoundation_();
-    var stays = readHomestayRows_(foundation.staySheet, HOMESTAY_STAY_HEADERS);
-    var services = readHomestayRows_(foundation.serviceSheet, HOMESTAY_SERVICE_HEADERS);
-    var stay = null;
-    for (var i = 0; i < stays.length; i++) {
-      if (String(stays[i].maLuuTru || "").trim() === maLuuTru) stay = stays[i];
-    }
-    if (!stay) return { success: false, message: "Không tìm thấy hồ sơ lưu trú." };
-    if (normalizeStayStatus_(stay.trangThaiLuuTru) !== HOMESTAY_STAY_STATUSES.IN_HOUSE) {
-      return { success: false, message: "Phòng không ở trạng thái Đang ở." };
-    }
-
-    var maSanPham = String(req.maSanPham || "").trim();
-    var tenSanPham = String(req.tenSanPham || "").trim();
-    var sp = null;
-    var catalog = getProductCatalog();
-    if (catalog && catalog.success && Array.isArray(catalog.data)) {
-      for (var c = 0; c < catalog.data.length; c++) {
-        if (
-          (maSanPham && String(catalog.data[c].maSanPham || "").trim() === maSanPham) ||
-          (tenSanPham && String(catalog.data[c].tenSanPham || "").trim() === tenSanPham)
-        ) {
-          sp = catalog.data[c];
-          break;
-        }
-      }
-    }
-    if (!sp) return { success: false, message: "Không tìm thấy dịch vụ/món trong SAN_PHAM." };
-    var soLuong = Math.max(1, Number(req.soLuong || 1));
-    var donGia = Math.max(0, Number(req.donGia || sp.donGiaBan || 0));
-    var thanhTien = soLuong * donGia;
-    appendHomestayRow_(foundation.serviceSheet, HOMESTAY_SERVICE_HEADERS, {
-      STT: "",
-      maLuuTru: maLuuTru,
-      thoiGian: new Date().toISOString(),
-      maSanPham: String(sp.maSanPham || "").trim(),
-      tenSanPham: String(sp.tenSanPham || "").trim(),
-      nhomHang: String(sp.nhomHang || "").trim(),
-      donVi: String(sp.donVi || "").trim(),
-      soLuong: soLuong,
-      donGia: donGia,
-      thanhTien: thanhTien,
-      ghiChu: String(req.ghiChu || "").trim(),
-    });
-
-    services = readHomestayRows_(foundation.serviceSheet, HOMESTAY_SERVICE_HEADERS);
-    var summary = buildStaySummary_(stay, services);
-    stay.tienDichVu = summary.tienDichVu;
-    stay.tongThanhToan = summary.tongThanhToan;
-    stay.canThuCheckout = summary.canThuCheckout;
-    writeHomestayRow_(foundation.staySheet, HOMESTAY_STAY_HEADERS, stay.__row, stay);
-
-    bumpAppCacheVersion_();
-    return { success: true, message: "Đã thêm dịch vụ phát sinh.", data: summary };
-  } catch (e) {
-    return { success: false, message: "Lỗi: " + e.message };
-  }
-}
-
-function checkoutRoom(payload) {
-  try {
-    var req = payload || {};
-    var maLuuTru = String(req.maLuuTru || "").trim();
-    if (!maLuuTru) return { success: false, message: "Thiếu mã lưu trú." };
-    var foundation = ensureHomestayFoundation_();
-    var stays = readHomestayRows_(foundation.staySheet, HOMESTAY_STAY_HEADERS);
-    var services = readHomestayRows_(foundation.serviceSheet, HOMESTAY_SERVICE_HEADERS);
-    var rooms = readHomestayRows_(foundation.roomSheet, HOMESTAY_ROOM_HEADERS);
-    var stay = null;
-    for (var i = 0; i < stays.length; i++) {
-      if (String(stays[i].maLuuTru || "").trim() === maLuuTru) stay = stays[i];
-    }
-    if (!stay) return { success: false, message: "Không tìm thấy hồ sơ lưu trú." };
-    if (normalizeStayStatus_(stay.trangThaiLuuTru) !== HOMESTAY_STAY_STATUSES.IN_HOUSE) {
-      return { success: false, message: "Hồ sơ lưu trú không ở trạng thái Đang ở." };
-    }
-    var summary = buildStaySummary_(stay, services);
-    stay.checkoutAtThucTe = parseIsoOrNow_(req.checkoutAtThucTe);
-    stay.trangThaiLuuTru = HOMESTAY_STAY_STATUSES.CHECKED_OUT;
-    stay.tienDichVu = summary.tienDichVu;
-    stay.tongThanhToan = summary.tongThanhToan;
-    stay.canThuCheckout = summary.canThuCheckout;
-    stay.ghiChu = String(req.ghiChu || stay.ghiChu || "").trim();
-    writeHomestayRow_(foundation.staySheet, HOMESTAY_STAY_HEADERS, stay.__row, stay);
-
-    for (var r = 0; r < rooms.length; r++) {
-      if (String(rooms[r].maPhong || "").trim() === String(stay.maPhong || "").trim()) {
-        rooms[r].trangThaiPhong = HOMESTAY_ROOM_STATUSES.CLEANING;
-        rooms[r].updatedAt = new Date().toISOString();
-        writeHomestayRow_(foundation.roomSheet, HOMESTAY_ROOM_HEADERS, rooms[r].__row, rooms[r]);
-      }
-    }
-    if (summary.canThuCheckout > 0) {
-      appendBankTransferHistory_({
-        ngay: new Date(),
-        khach: String(stay.tenKhach || "").trim(),
-        soTien: summary.canThuCheckout,
-        noiDung: maLuuTru + " checkout",
-        maDonHang: maLuuTru,
-        trangThai: "Thu tiền phát sinh",
-      });
-    }
-
-    bumpAppCacheVersion_();
-    return { success: true, message: "Checkout thành công.", data: summary };
-  } catch (e) {
-    return { success: false, message: "Lỗi: " + e.message };
-  }
-}
-
-function updateRoomStatus(payload) {
-  try {
-    var req = payload || {};
-    var maPhong = String(req.maPhong || "").trim();
-    var trangThaiPhong = String(req.trangThaiPhong || "").trim();
-    if (!maPhong || !trangThaiPhong) return { success: false, message: "Thiếu mã phòng hoặc trạng thái." };
-    var foundation = ensureHomestayFoundation_();
-    var rooms = readHomestayRows_(foundation.roomSheet, HOMESTAY_ROOM_HEADERS);
-    for (var i = 0; i < rooms.length; i++) {
-      if (String(rooms[i].maPhong || "").trim() === maPhong) {
-        rooms[i].trangThaiPhong = normalizeRoomStatus_(trangThaiPhong);
-        rooms[i].updatedAt = new Date().toISOString();
-        rooms[i].ghiChu = String(req.ghiChu || rooms[i].ghiChu || "").trim();
-        writeHomestayRow_(foundation.roomSheet, HOMESTAY_ROOM_HEADERS, rooms[i].__row, rooms[i]);
-        bumpAppCacheVersion_();
-        return { success: true, message: "Đã cập nhật trạng thái phòng.", data: rooms[i] };
-      }
-    }
-    return { success: false, message: "Không tìm thấy phòng." };
-  } catch (e) {
-    return { success: false, message: "Lỗi: " + e.message };
-  }
-}
-
 /* CLIENT_API_WRAPPERS */
-const loginClient = (email, password, appScope) =>
-  call("login", email, password, appScope);
-const loginWithDeviceTokenClient = (deviceToken, appScope) =>
-  call("loginWithDeviceToken", deviceToken, appScope);
-const revokeDeviceTokenClient = (deviceToken, appScope) =>
-  call("revokeDeviceToken", deviceToken, appScope);
+const loginClient = (email, password) => call("login", email, password);
 const getUserInfoClient = (email) => call("getUserInfo", email);
 const getDemoAccountsClient = () => call("getDemoAccounts");
 const getGlobalNoticeClient = () => call("getGlobalNotice");
@@ -5295,13 +4647,7 @@ const getNextInventoryReceiptDefaultsClient = () =>
   call("getNextInventoryReceiptDefaults");
 const getProductCatalogClient = () => call("getProductCatalog");
 const getBankConfigClient = () => call("getBankConfig");
-const getRoomsClient = () => call("getRooms");
-const getStayHistoryClient = (filters) => call("getStayHistory", filters || {});
-const createBookingClient = (payload) => call("createBooking", payload);
-const checkInRoomClient = (payload) => call("checkInRoom", payload);
-const addStayServiceItemClient = (payload) => call("addStayServiceItem", payload);
-const checkoutRoomClient = (payload) => call("checkoutRoom", payload);
-const updateRoomStatusClient = (payload) => call("updateRoomStatus", payload);
+const updateBankConfigClient = (payload) => call("updateBankConfig", payload);
 const updateProductCatalogItemClient = (payload) =>
   call("updateProductCatalogItem", payload);
 const createProductCatalogItemClient = (payload) =>
@@ -5328,8 +4674,6 @@ const uploadImageToImgBBClient = (base64Data) =>
 export const gasAdapter = {
   call,
   login: loginClient,
-  loginWithDeviceToken: loginWithDeviceTokenClient,
-  revokeDeviceToken: revokeDeviceTokenClient,
   getUserInfo: getUserInfoClient,
   getDemoAccounts: getDemoAccountsClient,
   getGlobalNotice: getGlobalNoticeClient,
@@ -5338,13 +4682,7 @@ export const gasAdapter = {
   getNextInventoryReceiptDefaults: getNextInventoryReceiptDefaultsClient,
   getProductCatalog: getProductCatalogClient,
   getBankConfig: getBankConfigClient,
-  getRooms: getRoomsClient,
-  getStayHistory: getStayHistoryClient,
-  createBooking: createBookingClient,
-  checkInRoom: checkInRoomClient,
-  addStayServiceItem: addStayServiceItemClient,
-  checkoutRoom: checkoutRoomClient,
-  updateRoomStatus: updateRoomStatusClient,
+  updateBankConfig: updateBankConfigClient,
   updateProductCatalogItem: updateProductCatalogItemClient,
   createProductCatalogItem: createProductCatalogItemClient,
   deleteProductCatalogItem: deleteProductCatalogItemClient,
