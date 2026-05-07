@@ -7,11 +7,9 @@ import {
   checkInRoom,
   checkoutRoom,
   createBooking,
-  getBankConfig,
   getProductCatalog,
   getRooms,
   getStayHistory,
-  updateBankConfig,
   updateRoomStatus,
 } from "../api";
 
@@ -29,41 +27,6 @@ const STATUS_OPTIONS = [
   ROOM_STATUS.CLEANING,
   ROOM_STATUS.BOOKED,
   ROOM_STATUS.MAINTENANCE,
-];
-
-const BANK_OPTIONS = [
-  "MBBank (Quân đội)",
-  "Vietcombank",
-  "Techcombank",
-  "ACB",
-  "BIDV",
-  "VPBank",
-  "TPBank",
-  "VietinBank",
-  "Sacombank",
-  "HDBank",
-  "Agribank",
-  "OCB",
-  "MSB (Hàng hải)",
-  "SHB (Sài Gòn - Hà Nội)",
-  "Eximbank",
-  "VIB",
-  "LPBank (Lộc Phát)",
-  "SCB (Sài Gòn)",
-  "NamABank",
-  "ABBANK (An Bình)",
-  "SeABank",
-  "KienLongBank",
-  "NCB (Quốc Dân)",
-  "BacABank",
-  "PGBank",
-  "BaoVietBank",
-  "PVcomBank",
-  "VietABank",
-  "VietBank",
-  "COOPBANK (Hợp tác xã)",
-  "CAKE by VPBank",
-  "ShinhanBank",
 ];
 
 const fmt = (n) => Number(n || 0).toLocaleString("vi-VN");
@@ -114,48 +77,6 @@ const cardTone = (status) => {
   return "border-rose-200 bg-rose-50/70";
 };
 
-const allowedRoomStatusOptions = (currentStatus) => {
-  const current = String(currentStatus || "").trim();
-  if (current === ROOM_STATUS.AVAILABLE) {
-    return [ROOM_STATUS.AVAILABLE, ROOM_STATUS.BOOKED, ROOM_STATUS.MAINTENANCE];
-  }
-  if (current === ROOM_STATUS.BOOKED) {
-    return [ROOM_STATUS.BOOKED, ROOM_STATUS.AVAILABLE, ROOM_STATUS.MAINTENANCE];
-  }
-  if (current === ROOM_STATUS.IN_HOUSE) {
-    return [ROOM_STATUS.IN_HOUSE];
-  }
-  if (current === ROOM_STATUS.CLEANING) {
-    return [ROOM_STATUS.CLEANING, ROOM_STATUS.AVAILABLE, ROOM_STATUS.MAINTENANCE];
-  }
-  if (current === ROOM_STATUS.MAINTENANCE) {
-    return [ROOM_STATUS.MAINTENANCE, ROOM_STATUS.AVAILABLE];
-  }
-  return STATUS_OPTIONS;
-};
-
-const isServiceCatalogItem = (item) => {
-  const type = String(item?.loai || "").trim().toUpperCase();
-  if (type === "MENU" || type === "DICH_VU") return true;
-  if (type === "ROOM" || type === "VAT_TU") return false;
-  const group = String(item?.nhomHang || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d");
-  if (!group) return true;
-  if (
-    group.includes("dich vu") ||
-    group.includes("nuoc") ||
-    group.includes("do an") ||
-    group.includes("thuc uong") ||
-    group.includes("menu")
-  )
-    return true;
-  if (group.includes("phong") || group.includes("vat tu")) return false;
-  return true;
-};
-
 function SectionTitle({ children }) {
   return (
     <h2 className="text-sm font-bold uppercase tracking-wide text-slate-700">
@@ -169,7 +90,6 @@ function RoomCard({ room, stay, onQuickCheckIn, onOpenStay, onStatusChange }) {
   const canQuickCheckIn =
     room.trangThaiPhong === ROOM_STATUS.AVAILABLE ||
     room.trangThaiPhong === ROOM_STATUS.BOOKED;
-  const statusOptions = allowedRoomStatusOptions(room.trangThaiPhong);
 
   return (
     <article
@@ -240,7 +160,7 @@ function RoomCard({ room, stay, onQuickCheckIn, onOpenStay, onStatusChange }) {
           onChange={(e) => onStatusChange(room, e.target.value)}
           className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold text-slate-700"
         >
-          {statusOptions.map((option) => (
+          {STATUS_OPTIONS.map((option) => (
             <option key={`${room.maPhong}-${option}`} value={option}>
               {option}
             </option>
@@ -248,97 +168,6 @@ function RoomCard({ room, stay, onQuickCheckIn, onOpenStay, onStatusChange }) {
         </select>
       </div>
     </article>
-  );
-}
-
-function BankConfigModal({ value, onClose, onSubmit, loading }) {
-  const [form, setForm] = useState(() => ({
-    bankCode: String(value?.bankCode || ""),
-    accountNumber: String(value?.accountNumber || ""),
-    accountName: String(value?.accountName || ""),
-  }));
-
-  useEffect(() => {
-    setForm({
-      bankCode: String(value?.bankCode || ""),
-      accountNumber: String(value?.accountNumber || ""),
-      accountName: String(value?.accountName || ""),
-    });
-  }, [value]);
-
-  return (
-    <div className="fixed inset-0 z-[9600] bg-slate-900/40 p-4">
-      <div className="mx-auto mt-[8vh] w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <h3 className="text-base font-bold text-slate-800">Sửa thông tin ngân hàng</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700"
-          >
-            Đóng
-          </button>
-        </div>
-
-        <div className="space-y-3 px-4 py-4">
-          <input
-            list="bank-options"
-            value={form.bankCode}
-            onChange={(e) => setForm((prev) => ({ ...prev, bankCode: e.target.value }))}
-            placeholder="Ngân hàng (có thể chọn hoặc nhập tay)"
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-          />
-          <datalist id="bank-options">
-            {BANK_OPTIONS.map((item) => (
-              <option key={`bank-${item}`} value={item}>
-                {item}
-              </option>
-            ))}
-          </datalist>
-          <input
-            value={form.accountNumber}
-            onChange={(e) =>
-              setForm((prev) => ({
-                ...prev,
-                accountNumber: String(e.target.value || "").replace(/[^\d]/g, ""),
-              }))
-            }
-            placeholder="Số tài khoản"
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-          />
-          <input
-            value={form.accountName}
-            onChange={(e) => setForm((prev) => ({ ...prev, accountName: e.target.value }))}
-            placeholder="Chủ tài khoản"
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-          />
-        </div>
-
-        <div className="flex justify-end gap-2 border-t border-slate-200 px-4 py-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700"
-          >
-            Hủy
-          </button>
-          <button
-            type="button"
-            disabled={loading || !form.bankCode || !form.accountNumber}
-            onClick={() =>
-              onSubmit({
-                bankCode: form.bankCode,
-                accountNumber: form.accountNumber,
-                accountName: form.accountName,
-              })
-            }
-            className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 disabled:opacity-60"
-          >
-            {loading ? "Đang lưu..." : "Lưu thông tin"}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -734,27 +563,20 @@ export default function CreateOrderPage() {
   const [rooms, setRooms] = useState([]);
   const [stays, setStays] = useState([]);
   const [catalog, setCatalog] = useState([]);
-  const [bankConfig, setBankConfig] = useState({
-    bankCode: "",
-    accountNumber: "",
-    accountName: "",
-  });
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [checkinRoom, setCheckinRoom] = useState(null);
   const [stayModal, setStayModal] = useState(null);
-  const [editingBank, setEditingBank] = useState(false);
 
   const loadData = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      const [roomRes, stayRes, productRes, bankRes] = await Promise.all([
+      const [roomRes, stayRes, productRes] = await Promise.all([
         getRooms(),
         getStayHistory({}),
         getProductCatalog(),
-        getBankConfig(),
       ]);
       setRooms(Array.isArray(roomRes?.data) ? roomRes.data : []);
       setStays(Array.isArray(stayRes?.data) ? stayRes.data : []);
@@ -768,14 +590,8 @@ export default function CreateOrderPage() {
                   `SP${String(idx + 1).padStart(4, "0")}`,
               }))
               .filter((x) => String(x.active ?? true) !== "false")
-              .filter(isServiceCatalogItem)
           : [],
       );
-      setBankConfig({
-        bankCode: String(bankRes?.data?.bankCode || ""),
-        accountNumber: String(bankRes?.data?.accountNumber || ""),
-        accountName: String(bankRes?.data?.accountName || ""),
-      });
     } catch (e) {
       toast.error("Không tải được dữ liệu homestay.");
     } finally {
@@ -794,8 +610,7 @@ export default function CreateOrderPage() {
       if (
         keys.includes(CACHE_KEYS.rooms) ||
         keys.includes(CACHE_KEYS.stayHistory) ||
-        keys.includes(CACHE_KEYS.productCatalog) ||
-        keys.includes(CACHE_KEYS.bankConfig)
+        keys.includes(CACHE_KEYS.productCatalog)
       ) {
         loadData({ silent: true });
       }
@@ -928,28 +743,6 @@ export default function CreateOrderPage() {
     }
   };
 
-  const handleBankSave = async (payload) => {
-    setActionLoading(true);
-    try {
-      const res = await updateBankConfig(payload);
-      if (!res?.success) throw new Error(res?.message || "Cập nhật thất bại");
-      setBankConfig({
-        bankCode: String(res?.data?.bankCode || payload.bankCode || ""),
-        accountNumber: String(
-          res?.data?.accountNumber || payload.accountNumber || "",
-        ),
-        accountName: String(res?.data?.accountName || payload.accountName || ""),
-      });
-      toast.success(res?.message || "Đã cập nhật thông tin ngân hàng.");
-      setEditingBank(false);
-      await loadData({ silent: true });
-    } catch (e) {
-      toast.error(e?.message || "Không cập nhật được thông tin ngân hàng.");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
   const openStay = (room, stay) => {
     if (!stay) return;
     setStayModal({ room, stay });
@@ -966,26 +759,9 @@ export default function CreateOrderPage() {
                 Checkin thu tiền phòng ngay, checkout chỉ thu phát sinh dịch vụ.
               </p>
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setEditingBank(true)}
-                className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700"
-              >
-                Sửa ngân hàng nhận tiền
-              </button>
-              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-                Đang ở: {grouped[ROOM_STATUS.IN_HOUSE]?.length || 0} phòng
-              </div>
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+              Đang ở: {grouped[ROOM_STATUS.IN_HOUSE]?.length || 0} phòng
             </div>
-          </div>
-
-          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-600">
-            TK nhận tiền VietQR:{" "}
-            <strong className="text-slate-800">
-              {bankConfig.bankCode || "-"} • {bankConfig.accountNumber || "-"} •{" "}
-              {bankConfig.accountName || "-"}
-            </strong>
           </div>
 
           <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto]">
@@ -1063,15 +839,6 @@ export default function CreateOrderPage() {
           onClose={() => setStayModal(null)}
           onAddService={handleAddService}
           onCheckout={handleCheckout}
-          loading={actionLoading}
-        />
-      )}
-
-      {editingBank && (
-        <BankConfigModal
-          value={bankConfig}
-          onClose={() => setEditingBank(false)}
-          onSubmit={handleBankSave}
           loading={actionLoading}
         />
       )}

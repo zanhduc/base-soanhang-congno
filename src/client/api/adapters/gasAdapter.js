@@ -1332,36 +1332,6 @@ function normalizeBankKey_(value) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
-function mapBankFieldByKey_(key) {
-  if (
-    key === "nganhang" ||
-    key === "bank" ||
-    key === "bankcode" ||
-    key === "manganhang"
-  ) {
-    return "bankCode";
-  }
-  if (
-    key === "stk" ||
-    key === "sotaikhoan" ||
-    key === "accountnumber" ||
-    key === "sotk"
-  ) {
-    return "accountNumber";
-  }
-  if (
-    key === "tenchutk" ||
-    key === "chutk" ||
-    key === "tentaikhoan" ||
-    key === "accountname" ||
-    key === "tenchutaikhoan" ||
-    key === "chutaikhoan"
-  ) {
-    return "accountName";
-  }
-  return "";
-}
-
 function getBankConfig() {
   return withSuccessCache_("read:bank_config", 45, function () {
     try {
@@ -1378,6 +1348,36 @@ function getBankConfig() {
       var bankCode = "";
       var accountNumber = "";
       var accountName = "";
+
+      function mapBankFieldByKey_(key) {
+        if (
+          key === "nganhang" ||
+          key === "bank" ||
+          key === "bankcode" ||
+          key === "manganhang"
+        ) {
+          return "bankCode";
+        }
+        if (
+          key === "stk" ||
+          key === "sotaikhoan" ||
+          key === "accountnumber" ||
+          key === "sotk"
+        ) {
+          return "accountNumber";
+        }
+        if (
+          key === "tenchutk" ||
+          key === "chutk" ||
+          key === "tentaikhoan" ||
+          key === "accountname" ||
+          key === "tenchutaikhoan" ||
+          key === "chutaikhoan"
+        ) {
+          return "accountName";
+        }
+        return "";
+      }
 
       // Mode 1: key-value theo cột (A=key, B=value)
       for (var i = 0; i < values.length; i++) {
@@ -1450,173 +1450,6 @@ function getBankConfig() {
       return { success: false, message: "Lỗi: " + e.message, data: null };
     }
   });
-}
-
-function updateBankConfig(payload) {
-  return runWithLockOrQueue_(
-    "UPDATE_BANK_CONFIG",
-    { payload: payload },
-    function () {
-      try {
-        var req = payload || {};
-        var bankCode = String(req.bankCode || "").trim();
-        var accountNumber = String(req.accountNumber || "").trim();
-        var accountName = String(req.accountName || "").trim();
-
-        if (!bankCode || !accountNumber) {
-          return {
-            success: false,
-            message: "Thiếu ngân hàng hoặc số tài khoản.",
-          };
-        }
-
-        var ss = SpreadsheetApp.getActiveSpreadsheet();
-        var sheet = ss.getSheetByName("BANK");
-        if (!sheet) sheet = ss.insertSheet("BANK");
-        if (!sheet) {
-          return {
-            success: false,
-            message: "Không thể tạo sheet BANK.",
-          };
-        }
-
-        var minRows = 3;
-        var minCols = 3;
-        if (sheet.getMaxRows() < minRows) {
-          sheet.insertRowsAfter(sheet.getMaxRows(), minRows - sheet.getMaxRows());
-        }
-        if (sheet.getMaxColumns() < minCols) {
-          sheet.insertColumnsAfter(
-            sheet.getMaxColumns(),
-            minCols - sheet.getMaxColumns(),
-          );
-        }
-
-        var lastRow = Math.max(sheet.getLastRow(), 1);
-        var lastCol = Math.max(sheet.getLastColumn(), 3);
-        var values = sheet.getRange(1, 1, lastRow, lastCol).getDisplayValues();
-
-        var kvRows = {};
-        for (var i = 0; i < values.length; i++) {
-          var key = normalizeBankKey_(values[i][0]);
-          var field = mapBankFieldByKey_(key);
-          if (!field || kvRows[field]) continue;
-          var val = String(values[i][1] || "").trim();
-          var valAsKey = normalizeBankKey_(val);
-          if (mapBankFieldByKey_(valAsKey)) continue;
-          kvRows[field] = i + 1;
-        }
-
-        if (kvRows.bankCode && kvRows.accountNumber) {
-          sheet.getRange(kvRows.bankCode, 2).setValue(bankCode);
-          sheet.getRange(kvRows.accountNumber, 2).setValue(accountNumber);
-          if (kvRows.accountName) {
-            sheet.getRange(kvRows.accountName, 2).setValue(accountName);
-          } else {
-            var nameRow = Math.max(kvRows.bankCode, kvRows.accountNumber) + 1;
-            if (sheet.getMaxRows() < nameRow) {
-              sheet.insertRowsAfter(
-                sheet.getMaxRows(),
-                nameRow - sheet.getMaxRows(),
-              );
-            }
-            sheet.getRange(nameRow, 1).setValue("Tên chủ tài khoản");
-            sheet.getRange(nameRow, 2).setValue(accountName);
-          }
-          bumpAppCacheVersion_();
-          return {
-            success: true,
-            message: "Đã cập nhật thông tin ngân hàng.",
-            data: {
-              bankCode: bankCode,
-              accountNumber: accountNumber,
-              accountName: accountName,
-            },
-          };
-        }
-
-        var targetRow = 0;
-        var colMap = {};
-        var headerRowNumber = 0;
-        for (var r = 0; r < values.length; r++) {
-          colMap = {};
-          for (var c = 0; c < values[r].length; c++) {
-            var headerKey = normalizeBankKey_(values[r][c]);
-            var mapped = mapBankFieldByKey_(headerKey);
-            if (mapped && colMap[mapped] === undefined) colMap[mapped] = c + 1;
-          }
-          if (
-            colMap.bankCode !== undefined &&
-            colMap.accountNumber !== undefined
-          ) {
-            headerRowNumber = r + 1;
-            for (var d = r + 1; d < values.length; d++) {
-              var rowData = values[d];
-              var hasAny =
-                String(rowData[colMap.bankCode - 1] || "").trim() ||
-                String(rowData[colMap.accountNumber - 1] || "").trim() ||
-                (colMap.accountName === undefined
-                  ? ""
-                  : String(rowData[colMap.accountName - 1] || "").trim());
-              if (!hasAny) continue;
-              targetRow = d + 1;
-              break;
-            }
-            if (!targetRow) targetRow = r + 2;
-            break;
-          }
-        }
-
-        if (targetRow && colMap.bankCode !== undefined) {
-          sheet.getRange(targetRow, colMap.bankCode).setValue(bankCode);
-          sheet.getRange(targetRow, colMap.accountNumber).setValue(accountNumber);
-          var accountNameCol =
-            colMap.accountName === undefined ? colMap.accountNumber + 1 : colMap.accountName;
-          if (sheet.getMaxColumns() < accountNameCol) {
-            sheet.insertColumnsAfter(
-              sheet.getMaxColumns(),
-              accountNameCol - sheet.getMaxColumns(),
-            );
-          }
-          sheet.getRange(targetRow, accountNameCol).setValue(accountName);
-          if (colMap.accountName === undefined) {
-            sheet.getRange(headerRowNumber || targetRow - 1, accountNameCol).setValue("CHỦ TÀI KHOẢN");
-          }
-          bumpAppCacheVersion_();
-          return {
-            success: true,
-            message: "Đã cập nhật thông tin ngân hàng.",
-            data: {
-              bankCode: bankCode,
-              accountNumber: accountNumber,
-              accountName: accountName,
-            },
-          };
-        }
-
-        sheet.getRange(1, 1, 3, 2).setValues([
-          ["Ngân hàng", bankCode],
-          ["Số tài khoản", accountNumber],
-          ["Chủ tài khoản", accountName],
-        ]);
-        bumpAppCacheVersion_();
-        return {
-          success: true,
-          message: "Đã cập nhật thông tin ngân hàng.",
-          data: {
-            bankCode: bankCode,
-            accountNumber: accountNumber,
-            accountName: accountName,
-          },
-        };
-      } catch (e) {
-        return {
-          success: false,
-          message: "Lỗi: " + e.message,
-        };
-      }
-    },
-  );
 }
 
 function findProductRowByKey_(sheet, dataStartRow, tenSanPham, donVi) {
@@ -4917,8 +4750,7 @@ function ensureHomestaySheet_(name, headers, seedRows) {
   var sh = ss.getSheetByName(name);
   if (!sh) sh = ss.insertSheet(name);
   if (sh.getLastColumn() < headers.length) {
-    var missingCols = headers.length - sh.getLastColumn();
-    sh.insertColumnsAfter(Math.max(1, sh.getLastColumn()), missingCols);
+    sh.insertColumnsAfter(sh.getLastColumn() || 1, headers.length);
   }
   sh.getRange(1, 1, 1, headers.length).setValues([headers]);
   sh.getRange(1, 1, 1, headers.length).setFontWeight("bold");
@@ -4927,98 +4759,6 @@ function ensureHomestaySheet_(name, headers, seedRows) {
     sh.getRange(2, 1, seedRows.length, headers.length).setValues(seedRows);
   }
   return sh;
-}
-
-function ensureMinSheetRows_(sheet, minRows) {
-  var safeMinRows = Math.max(2, Number(minRows || 2));
-  if (sheet.getMaxRows() >= safeMinRows) return;
-  sheet.insertRowsAfter(sheet.getMaxRows(), safeMinRows - sheet.getMaxRows());
-}
-
-function applyListValidationToColumn_(sheet, colIndex, options, startRow) {
-  if (!sheet || !colIndex || !options || !options.length) return;
-  var fromRow = Math.max(2, Number(startRow || 2));
-  var maxRows = sheet.getMaxRows();
-  if (maxRows < fromRow) return;
-  var rowCount = maxRows - fromRow + 1;
-  if (rowCount <= 0) return;
-  var rule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(
-      options.map(function (x) {
-        return String(x);
-      }),
-      true,
-    )
-    .setAllowInvalid(false)
-    .build();
-  sheet.getRange(fromRow, colIndex, rowCount, 1).setDataValidation(rule);
-}
-
-function bootstrapHomestaySheets_() {
-  var foundation = ensureHomestayFoundation_();
-  var roomSheet = foundation.roomSheet;
-  var staySheet = foundation.staySheet;
-  var serviceSheet = foundation.serviceSheet;
-
-  ensureMinSheetRows_(roomSheet, 2000);
-  ensureMinSheetRows_(staySheet, 5000);
-  ensureMinSheetRows_(serviceSheet, 15000);
-
-  roomSheet.setFrozenRows(1);
-  staySheet.setFrozenRows(1);
-  serviceSheet.setFrozenRows(1);
-
-  applyListValidationToColumn_(
-    roomSheet,
-    5,
-    [
-      HOMESTAY_ROOM_STATUSES.AVAILABLE,
-      HOMESTAY_ROOM_STATUSES.IN_HOUSE,
-      HOMESTAY_ROOM_STATUSES.CLEANING,
-      HOMESTAY_ROOM_STATUSES.BOOKED,
-      HOMESTAY_ROOM_STATUSES.MAINTENANCE,
-    ],
-    2,
-  );
-  applyListValidationToColumn_(staySheet, 8, ["THEO_DEM", "THEO_GIO"], 2);
-  applyListValidationToColumn_(
-    staySheet,
-    20,
-    [
-      HOMESTAY_STAY_STATUSES.BOOKED,
-      HOMESTAY_STAY_STATUSES.IN_HOUSE,
-      HOMESTAY_STAY_STATUSES.CHECKED_OUT,
-      HOMESTAY_STAY_STATUSES.CANCELLED,
-    ],
-    2,
-  );
-
-  try {
-    updateSTT_(roomSheet, 2);
-    updateSTT_(staySheet, 2);
-    updateSTT_(serviceSheet, 2);
-  } catch (e) {
-    // noop
-  }
-
-  return {
-    success: true,
-    message:
-      "Đã bootstrap sheet homestay: PHONG, LUU_TRU, LUU_TRU_DICH_VU (header + validation).",
-    data: {
-      roomRows: roomSheet.getMaxRows(),
-      stayRows: staySheet.getMaxRows(),
-      serviceRows: serviceSheet.getMaxRows(),
-    },
-  };
-}
-
-function bootstrapHomestaySheets() {
-  try {
-    return bootstrapHomestaySheets_();
-  } catch (e) {
-    return { success: false, message: "Lỗi bootstrap: " + e.message };
-  }
 }
 
 function readHomestayRows_(sheet, headers) {
@@ -5097,50 +4837,15 @@ function diffNightsRoundedUp_(startIso, endIso) {
 
 function nextCodeFromRows_(rows, key, prefix, defaultCode) {
   var latest = "";
-  var maxNum = -1;
   for (var i = 0; i < rows.length; i++) {
     var code = String(rows[i][key] || "").trim();
-    if (code.indexOf(prefix) !== 0) continue;
-    var m = code.match(/(\d+)$/);
-    var num = m ? Number(m[1]) : -1;
-    if (num > maxNum) {
-      maxNum = num;
+    if (code.indexOf(prefix) === 0) {
       latest = code;
+      break;
     }
   }
   if (!latest) latest = defaultCode;
   return incrementOrderCode_(latest, defaultCode);
-}
-
-function canTransitionRoomStatus_(currentStatus, nextStatus) {
-  var current = normalizeRoomStatus_(currentStatus);
-  var next = normalizeRoomStatus_(nextStatus);
-  if (current === next) return true;
-  if (current === HOMESTAY_ROOM_STATUSES.AVAILABLE) {
-    return (
-      next === HOMESTAY_ROOM_STATUSES.BOOKED ||
-      next === HOMESTAY_ROOM_STATUSES.MAINTENANCE
-    );
-  }
-  if (current === HOMESTAY_ROOM_STATUSES.BOOKED) {
-    return (
-      next === HOMESTAY_ROOM_STATUSES.AVAILABLE ||
-      next === HOMESTAY_ROOM_STATUSES.MAINTENANCE
-    );
-  }
-  if (current === HOMESTAY_ROOM_STATUSES.IN_HOUSE) {
-    return next === HOMESTAY_ROOM_STATUSES.CLEANING;
-  }
-  if (current === HOMESTAY_ROOM_STATUSES.CLEANING) {
-    return (
-      next === HOMESTAY_ROOM_STATUSES.AVAILABLE ||
-      next === HOMESTAY_ROOM_STATUSES.MAINTENANCE
-    );
-  }
-  if (current === HOMESTAY_ROOM_STATUSES.MAINTENANCE) {
-    return next === HOMESTAY_ROOM_STATUSES.AVAILABLE;
-  }
-  return false;
 }
 
 function buildStaySummary_(stay, serviceRows) {
@@ -5151,12 +4856,6 @@ function buildStaySummary_(stay, serviceRows) {
     return sum + Number(x.thanhTien || 0);
   }, 0);
   var tienPhong = Number(stay.tienPhong || 0);
-  var stayStatus = normalizeStayStatus_(stay.trangThaiLuuTru);
-  var canThuCheckout =
-    stayStatus === HOMESTAY_STAY_STATUSES.CHECKED_OUT ||
-    stayStatus === HOMESTAY_STAY_STATUSES.CANCELLED
-      ? 0
-      : Math.max(tienDichVu, 0);
   return {
     maLuuTru: String(stay.maLuuTru || "").trim(),
     maDatPhong: String(stay.maDatPhong || "").trim(),
@@ -5175,8 +4874,8 @@ function buildStaySummary_(stay, serviceRows) {
     tienDichVu: tienDichVu,
     tongThanhToan: tienPhong + tienDichVu,
     daThuCheckin: Number(stay.daThuCheckin || 0),
-    canThuCheckout: canThuCheckout,
-    trangThaiLuuTru: stayStatus,
+    canThuCheckout: Math.max(tienDichVu, 0),
+    trangThaiLuuTru: normalizeStayStatus_(stay.trangThaiLuuTru),
     ghiChu: String(stay.ghiChu || "").trim(),
     serviceItems: items.map(function (x) {
       return {
@@ -5521,7 +5220,7 @@ function checkoutRoom(payload) {
     stay.trangThaiLuuTru = HOMESTAY_STAY_STATUSES.CHECKED_OUT;
     stay.tienDichVu = summary.tienDichVu;
     stay.tongThanhToan = summary.tongThanhToan;
-    stay.canThuCheckout = 0;
+    stay.canThuCheckout = summary.canThuCheckout;
     stay.ghiChu = String(req.ghiChu || stay.ghiChu || "").trim();
     writeHomestayRow_(foundation.staySheet, HOMESTAY_STAY_HEADERS, stay.__row, stay);
 
@@ -5560,15 +5259,7 @@ function updateRoomStatus(payload) {
     var rooms = readHomestayRows_(foundation.roomSheet, HOMESTAY_ROOM_HEADERS);
     for (var i = 0; i < rooms.length; i++) {
       if (String(rooms[i].maPhong || "").trim() === maPhong) {
-        var nextStatus = normalizeRoomStatus_(trangThaiPhong);
-        if (!canTransitionRoomStatus_(rooms[i].trangThaiPhong, nextStatus)) {
-          return {
-            success: false,
-            message:
-              "Không thể chuyển trạng thái phòng theo hướng này. Hãy thao tác đúng luồng checkin/checkout.",
-          };
-        }
-        rooms[i].trangThaiPhong = nextStatus;
+        rooms[i].trangThaiPhong = normalizeRoomStatus_(trangThaiPhong);
         rooms[i].updatedAt = new Date().toISOString();
         rooms[i].ghiChu = String(req.ghiChu || rooms[i].ghiChu || "").trim();
         writeHomestayRow_(foundation.roomSheet, HOMESTAY_ROOM_HEADERS, rooms[i].__row, rooms[i]);
@@ -5604,7 +5295,6 @@ const getNextInventoryReceiptDefaultsClient = () =>
   call("getNextInventoryReceiptDefaults");
 const getProductCatalogClient = () => call("getProductCatalog");
 const getBankConfigClient = () => call("getBankConfig");
-const updateBankConfigClient = (payload) => call("updateBankConfig", payload);
 const getRoomsClient = () => call("getRooms");
 const getStayHistoryClient = (filters) => call("getStayHistory", filters || {});
 const createBookingClient = (payload) => call("createBooking", payload);
@@ -5612,7 +5302,6 @@ const checkInRoomClient = (payload) => call("checkInRoom", payload);
 const addStayServiceItemClient = (payload) => call("addStayServiceItem", payload);
 const checkoutRoomClient = (payload) => call("checkoutRoom", payload);
 const updateRoomStatusClient = (payload) => call("updateRoomStatus", payload);
-const bootstrapHomestaySheetsClient = () => call("bootstrapHomestaySheets");
 const updateProductCatalogItemClient = (payload) =>
   call("updateProductCatalogItem", payload);
 const createProductCatalogItemClient = (payload) =>
@@ -5649,7 +5338,6 @@ export const gasAdapter = {
   getNextInventoryReceiptDefaults: getNextInventoryReceiptDefaultsClient,
   getProductCatalog: getProductCatalogClient,
   getBankConfig: getBankConfigClient,
-  updateBankConfig: updateBankConfigClient,
   getRooms: getRoomsClient,
   getStayHistory: getStayHistoryClient,
   createBooking: createBookingClient,
@@ -5657,7 +5345,6 @@ export const gasAdapter = {
   addStayServiceItem: addStayServiceItemClient,
   checkoutRoom: checkoutRoomClient,
   updateRoomStatus: updateRoomStatusClient,
-  bootstrapHomestaySheets: bootstrapHomestaySheetsClient,
   updateProductCatalogItem: updateProductCatalogItemClient,
   createProductCatalogItem: createProductCatalogItemClient,
   deleteProductCatalogItem: deleteProductCatalogItemClient,

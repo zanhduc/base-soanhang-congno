@@ -74,8 +74,6 @@ const INVALIDATION_KEYS = Object.freeze({
   addStayServiceItem: [CACHE_KEYS.stayHistory],
   checkoutRoom: [CACHE_KEYS.rooms, CACHE_KEYS.stayHistory],
   updateRoomStatus: [CACHE_KEYS.rooms],
-  bootstrapHomestaySheets: [CACHE_KEYS.rooms, CACHE_KEYS.stayHistory],
-  updateBankConfig: [CACHE_KEYS.bankConfig],
   updateOrder: [
     CACHE_KEYS.orderHistory,
     CACHE_KEYS.inventory,
@@ -180,10 +178,6 @@ export const getBankConfig = createLocalFirstReader(
   adapter.getBankConfig,
   BG_SPARSE_60M,
 );
-export const updateBankConfig = createMutationWithInvalidation(
-  adapter.updateBankConfig,
-  INVALIDATION_KEYS.updateBankConfig,
-);
 export const getRooms = createLocalFirstReader(
   CACHE_KEYS.rooms,
   adapter.getRooms,
@@ -213,10 +207,6 @@ export const checkoutRoom = createMutationWithInvalidation(
 export const updateRoomStatus = createMutationWithInvalidation(
   adapter.updateRoomStatus,
   INVALIDATION_KEYS.updateRoomStatus,
-);
-export const bootstrapHomestaySheets = createMutationWithInvalidation(
-  adapter.bootstrapHomestaySheets,
-  INVALIDATION_KEYS.bootstrapHomestaySheets,
 );
 export const updateProductCatalogItem = createMutationWithInvalidation(
   adapter.updateProductCatalogItem,

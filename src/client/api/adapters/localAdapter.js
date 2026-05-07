@@ -816,11 +816,7 @@ const buildStaySnapshot = (stay) => {
   );
   const tongThanhToan = Number(stay.tienPhong || 0) + tienDichVu;
   const daThuCheckin = Number(stay.daThuCheckin || 0);
-  const status = String(stay.trangThaiLuuTru || "").toUpperCase();
-  const canThuCheckout =
-    status === STAY_STATUS.CHECKED_OUT || status === STAY_STATUS.CANCELLED
-      ? 0
-      : Math.max(tienDichVu, 0);
+  const canThuCheckout = Math.max(tienDichVu, 0);
   return {
     ...stay,
     tienDichVu,
@@ -829,28 +825,6 @@ const buildStaySnapshot = (stay) => {
     canThuCheckout,
     serviceItems,
   };
-};
-
-const canTransitionRoomStatus = (currentStatus, nextStatus) => {
-  const current = String(currentStatus || "").trim();
-  const next = String(nextStatus || "").trim();
-  if (current === next) return true;
-  if (current === ROOM_STATUS.AVAILABLE) {
-    return next === ROOM_STATUS.BOOKED || next === ROOM_STATUS.MAINTENANCE;
-  }
-  if (current === ROOM_STATUS.BOOKED) {
-    return next === ROOM_STATUS.AVAILABLE || next === ROOM_STATUS.MAINTENANCE;
-  }
-  if (current === ROOM_STATUS.IN_HOUSE) {
-    return next === ROOM_STATUS.CLEANING;
-  }
-  if (current === ROOM_STATUS.CLEANING) {
-    return next === ROOM_STATUS.AVAILABLE || next === ROOM_STATUS.MAINTENANCE;
-  }
-  if (current === ROOM_STATUS.MAINTENANCE) {
-    return next === ROOM_STATUS.AVAILABLE;
-  }
-  return false;
 };
 
 const helloServer = async () => {
@@ -956,24 +930,6 @@ const getBankConfig = async () => {
   };
 };
 
-const updateBankConfig = async (payload = {}) => {
-  await sleep(160);
-  const bankCode = String(payload.bankCode || "").trim();
-  const accountNumber = String(payload.accountNumber || "").trim();
-  const accountName = String(payload.accountName || "").trim();
-  if (!bankCode || !accountNumber) {
-    return { success: false, message: "Thiếu ngân hàng hoặc số tài khoản." };
-  }
-  MOCK_BANK_CONFIG.bankCode = bankCode;
-  MOCK_BANK_CONFIG.accountNumber = accountNumber;
-  MOCK_BANK_CONFIG.accountName = accountName;
-  return {
-    success: true,
-    message: "Đã cập nhật thông tin ngân hàng (Mock).",
-    data: { ...MOCK_BANK_CONFIG },
-  };
-};
-
 const getRooms = async () => {
   await sleep(120);
   return {
@@ -1041,16 +997,11 @@ const getStayHistory = async (filters = {}) => {
 const createBooking = async (payload = {}) => {
   await sleep(180);
   const maPhong = String(payload.maPhong || "").trim();
-  const tenKhach = String(payload.tenKhach || "").trim();
-  if (!maPhong || !tenKhach)
-    return { success: false, message: "Thiếu mã phòng hoặc tên khách." };
+  if (!maPhong) return { success: false, message: "Thiếu mã phòng." };
   const room = MOCK_ROOMS.find((x) => String(x.maPhong) === maPhong);
   if (!room) return { success: false, message: "Không tìm thấy phòng." };
   if (room.trangThaiPhong === ROOM_STATUS.IN_HOUSE) {
     return { success: false, message: "Phòng đang có khách ở." };
-  }
-  if (room.trangThaiPhong === ROOM_STATUS.MAINTENANCE) {
-    return { success: false, message: "Phòng đang bảo trì." };
   }
   room.trangThaiPhong = ROOM_STATUS.BOOKED;
   room.updatedAt = new Date().toISOString();
@@ -1212,7 +1163,7 @@ const checkoutRoom = async (payload = {}) => {
   stay.checkoutAtThucTe = toIsoStringOrNow(payload.checkoutAtThucTe);
   stay.trangThaiLuuTru = STAY_STATUS.CHECKED_OUT;
   stay.ghiChu = String(payload.ghiChu || stay.ghiChu || "").trim();
-  stay.canThuCheckout = 0;
+  stay.canThuCheckout = Number(stay.tienDichVu || 0);
 
   const room = MOCK_ROOMS.find((x) => String(x.maPhong) === String(stay.maPhong));
   if (room) {
@@ -1236,30 +1187,9 @@ const updateRoomStatus = async (payload = {}) => {
   }
   const room = MOCK_ROOMS.find((x) => String(x.maPhong) === maPhong);
   if (!room) return { success: false, message: "Không tìm thấy phòng." };
-  if (!canTransitionRoomStatus(room.trangThaiPhong, trangThaiPhong)) {
-    return {
-      success: false,
-      message:
-        "Không thể chuyển trạng thái phòng theo hướng này. Hãy thao tác đúng luồng checkin/checkout.",
-    };
-  }
   room.trangThaiPhong = trangThaiPhong;
   room.updatedAt = new Date().toISOString();
   return { success: true, message: "Đã cập nhật trạng thái phòng.", data: room };
-};
-
-const bootstrapHomestaySheets = async () => {
-  await sleep(80);
-  return {
-    success: true,
-    message:
-      "Mock: đã bootstrap sheet homestay (PHONG, LUU_TRU, LUU_TRU_DICH_VU).",
-    data: {
-      roomRows: 2000,
-      stayRows: 5000,
-      serviceRows: 15000,
-    },
-  };
 };
 
 const updateProductCatalogItem = async (payload) => {
@@ -1866,7 +1796,6 @@ const call = async (fnName, ...args) => {
     return getNextInventoryReceiptDefaults();
   if (fnName === "getProductCatalog") return getProductCatalog();
   if (fnName === "getBankConfig") return getBankConfig();
-  if (fnName === "updateBankConfig") return updateBankConfig(args[0]);
   if (fnName === "getRooms") return getRooms();
   if (fnName === "getStayHistory") return getStayHistory(args[0]);
   if (fnName === "createBooking") return createBooking(args[0]);
@@ -1874,7 +1803,6 @@ const call = async (fnName, ...args) => {
   if (fnName === "addStayServiceItem") return addStayServiceItem(args[0]);
   if (fnName === "checkoutRoom") return checkoutRoom(args[0]);
   if (fnName === "updateRoomStatus") return updateRoomStatus(args[0]);
-  if (fnName === "bootstrapHomestaySheets") return bootstrapHomestaySheets();
   if (fnName === "updateProductCatalogItem")
     return updateProductCatalogItem(args[0]);
   if (fnName === "createProductCatalogItem")
@@ -2118,7 +2046,6 @@ export const localAdapter = {
   getNextInventoryReceiptDefaults,
   getProductCatalog,
   getBankConfig,
-  updateBankConfig,
   getRooms,
   getStayHistory,
   createBooking,
@@ -2126,7 +2053,6 @@ export const localAdapter = {
   addStayServiceItem,
   checkoutRoom,
   updateRoomStatus,
-  bootstrapHomestaySheets,
   updateProductCatalogItem,
   createProductCatalogItem,
   deleteProductCatalogItem,
