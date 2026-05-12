@@ -60,7 +60,7 @@ export default function FloatingMenu({
     { id: "create-order", label: "Soạn đơn hàng", icon: "🧾" },
     { id: "history", label: "Lịch sử hóa đơn", icon: "🕘" },
     { id: "products", label: "Quản lý sản phẩm", icon: "📦" },
-    { id: "inventory", label: "Nhập nguyên liệu", icon: "📥" },
+    { id: "inventory", label: "Nhập sản phẩm", icon: "📥" },
     { id: "debt", label: "Quản lý công nợ", icon: "📒" },
     { id: "stats", label: "Thống kê", icon: "📊" },
     // { id: "print-diagnostic", label: "Tự kiểm tra in", icon: "🖨️" },

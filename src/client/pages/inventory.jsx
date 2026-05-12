@@ -206,7 +206,7 @@ export default function InventoryPage({ user }) {
     const soLuong = Number(newMaterial.soLuong || 0);
     const giaNhap = Number(newMaterial.giaNhap || 0);
 
-    if (!tenSanPham) nextErrors.new_tenSanPham = "Chưa có tên nguyên liệu";
+    if (!tenSanPham) nextErrors.new_tenSanPham = "Chưa có tên sản phẩm";
     if (!donVi) nextErrors.new_donVi = "Chưa có đơn vị";
     if (soLuong <= 0) nextErrors.new_soLuong = "Số lượng phải > 0";
     if (soLuong > 100000) nextErrors.new_soLuong = "Số lượng tối đa 100000";
@@ -217,7 +217,7 @@ export default function InventoryPage({ user }) {
         foldText(m.tenSanPham) === foldText(tenSanPham) &&
         foldText(m.donVi) === foldText(donVi),
     );
-    if (isDuplicate) nextErrors.new_tenSanPham = "Nguyên liệu đã có trong phiếu";
+    if (isDuplicate) nextErrors.new_tenSanPham = "Sản phẩm đã có trong phiếu";
 
     if (Object.keys(nextErrors).length > 0) {
       setErrors((prev) => ({ ...prev, ...nextErrors }));
@@ -266,7 +266,7 @@ export default function InventoryPage({ user }) {
       nextErrors.nhaCungCap = "Vui lòng nhập tên nhà cung cấp";
     }
     if (materials.length === 0) {
-      toast.error("Vui lòng thêm ít nhất một nguyên liệu");
+      toast.error("Vui lòng thêm ít nhất một sản phẩm");
       return;
     }
     if (receiptInfo.trangThai === RECEIPT_STATUS.PARTIAL) {
@@ -321,8 +321,8 @@ export default function InventoryPage({ user }) {
 
     runInBackground({
       apiCall: () => createInventoryReceipt(payload),
-      successMessage: "Tạo phiếu nhập nguyên liệu thành công!",
-      changeDescription: `Tạo phiếu nhập nguyên liệu \"${maPhieu}\"`,
+      successMessage: "Tạo phiếu nhập sản phẩm thành công!",
+      changeDescription: `Tạo phiếu nhập sản phẩm \"${maPhieu}\"`,
       userName: user?.name || user?.email || "unknown",
       onComplete: (result) => {
         setIsSubmitting(false);
@@ -344,10 +344,10 @@ export default function InventoryPage({ user }) {
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 py-6 md:py-8 pb-24">
         <div className="mb-8 max-w-3xl">
           <h1 className="text-4xl md:text-5xl font-black text-slate-900 leading-[1.15]">
-            Nhập Nguyên Liệu
+            Nhập Sản Phẩm
           </h1>
           <p className="mt-3 text-sm md:text-base text-slate-500 max-w-xl leading-relaxed font-medium">
-            Ghi nhận nguyên liệu đã nhập và chi phí theo từng phiếu. Dữ liệu này
+            Ghi nhận sản phẩm đã nhập và chi phí theo từng phiếu. Dữ liệu này
             không làm thay đổi tồn kho sản phẩm bán hàng.
           </p>
         </div>
@@ -533,14 +533,14 @@ export default function InventoryPage({ user }) {
             <div className="rounded-2xl border border-slate-200/50 bg-white shadow-sm overflow-hidden">
               <div className="bg-emerald-50/80 border-b border-emerald-100/50 px-5 py-4">
                 <h3 className="font-bold text-sm md:text-base text-emerald-800 uppercase tracking-widest">
-                  Thêm nguyên liệu
+                  Thêm sản phẩm
                 </h3>
               </div>
               <div className="p-5 md:p-6 space-y-4">
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="md:col-span-2">
                     <label className="mb-1.5 block text-xs font-semibold text-slate-500">
-                      Tên nguyên liệu <span className="text-rose-500">*</span>
+                      Tên sản phẩm <span className="text-rose-500">*</span>
                     </label>
                     <input
                       value={newMaterial.tenSanPham}
@@ -562,7 +562,7 @@ export default function InventoryPage({ user }) {
                   </div>
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-500">
-                      Nhóm nguyên liệu
+                      Nhóm sản phẩm
                     </label>
                     <input
                       value={newMaterial.nhomHang}
@@ -656,12 +656,12 @@ export default function InventoryPage({ user }) {
             <div className="rounded-2xl border border-slate-200/50 bg-white shadow-sm overflow-hidden">
               <div className="bg-slate-50 border-b border-slate-100 px-5 py-4">
                 <h3 className="font-bold text-sm md:text-base text-slate-800 uppercase tracking-widest">
-                  Danh sách nguyên liệu ({materials.length})
+                  Danh sách sản phẩm ({materials.length})
                 </h3>
               </div>
               <div className="p-5 md:p-6 space-y-3">
                 {materials.length === 0 ? (
-                  <p className="text-sm text-slate-500">Chưa có nguyên liệu nào trong phiếu.</p>
+                  <p className="text-sm text-slate-500">Chưa có sản phẩm nào trong phiếu.</p>
                 ) : (
                   materials.map((m) => (
                     <div
@@ -713,7 +713,7 @@ export default function InventoryPage({ user }) {
                 disabled={isSubmitting}
                 className="w-full rounded-xl bg-gradient-to-r from-rose-700 to-rose-500 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60 hover:shadow-lg hover:shadow-rose-700/25"
               >
-                {isSubmitting ? "Đang gửi phiếu..." : "Lưu phiếu nhập nguyên liệu"}
+                {isSubmitting ? "Đang gửi phiếu..." : "Lưu phiếu nhập sản phẩm"}
               </button>
             </div>
           </div>

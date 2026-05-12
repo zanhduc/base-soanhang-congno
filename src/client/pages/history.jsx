@@ -2148,7 +2148,7 @@ export default function HistoryPage() {
               onClick={() => setActiveTab("receipts")}
               className={`flex-1 md:w-32 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === "receipts" ? "bg-white text-rose-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
             >
-              Nhập nguyên liệu
+              Nhập sản phẩm
             </button>
           </div>
         </div>
